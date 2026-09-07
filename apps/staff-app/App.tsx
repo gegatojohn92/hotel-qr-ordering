@@ -316,13 +316,29 @@ function MainAppContent() {
   }, [activeStaffUser])
   const [isRestoringSession, setIsRestoringSession] = useState(true)
   const [incomingAlert, setIncomingAlert] = useState<IncomingRequest | null>(null)
-  const [incomingLiveCall, setIncomingLiveCall] = useState<{
-    requestId: string
-    roomNumber: string
-    channel: string
-  } | null>(null)
+  const [incomingCallQueue, setIncomingCallQueue] = useState<
+    Array<{
+      requestId: string
+      roomNumber: string
+      channel: string
+    }>
+  >([])
   const [activeCallRoom, setActiveCallRoom] = useState<string | null>(null)
   const [activeCallRequestId, setActiveCallRequestId] = useState<string | null>(null)
+
+  const enqueueLiveCall = useCallback(
+    (call: { requestId: string; roomNumber: string; channel: string }) => {
+      setIncomingCallQueue((prev) => {
+        if (prev.some((c) => c.requestId === call.requestId)) return prev
+        return [...prev, call]
+      })
+    },
+    []
+  )
+
+  const dequeueLiveCall = useCallback((reqId: string) => {
+    setIncomingCallQueue((prev) => prev.filter((c) => c.requestId !== reqId))
+  }, [])
 
   // EXPO_PUBLIC_ vars are inlined at Metro/webpack build time.
   // On Vercel, set EXPO_PUBLIC_AGORA_APP_ID in the project env settings.
@@ -350,7 +366,31 @@ function MainAppContent() {
   const handleAnswerLiveCall = useCallback(
     async (channel: string, reqId: string) => {
       try {
-        setIncomingLiveCall(null)
+        const staffUserId = activeStaffUserRef.current?.id || null
+
+        // Concurrency Guard: Atomic update check to ensure only ONE staff member claims the call
+        const { data: claimData, error: claimError } = await supabase
+          .from('requests')
+          .update({
+            status: 'LIVE',
+            claimed_by_staff_id: staffUserId,
+            call_started_at: new Date().toISOString(),
+          } as any)
+          .eq('id', reqId)
+          .eq('status', 'PENDING')
+          .select()
+
+        if (claimError || !claimData || (claimData as any[]).length === 0) {
+          // Already claimed by another staff member or cancelled by guest
+          dequeueLiveCall(reqId)
+          Alert.alert(
+            'Call Unavailable',
+            'This call was already answered by another staff member or cancelled by the guest.'
+          )
+          return
+        }
+
+        dequeueLiveCall(reqId)
         setActiveCallRequestId(reqId)
 
         // Lookup room number for display
@@ -382,25 +422,30 @@ function MainAppContent() {
 
         // Join Agora voice channel as staff (UID 2)
         await staffVoiceCall.joinChannel(channel, tokenData.token, AGORA_APP_ID)
-
-        // Mark request status as LIVE
-        await supabase.from('requests').update({ status: 'LIVE' }).eq('id', reqId)
       } catch (err: any) {
         console.error('[App] Answer live call error:', err)
         Alert.alert('Call Failed', `Could not connect to live voice call.\n${err?.message || err || 'Unknown error'}`)
+        setActiveCallRoom(null)
+        setActiveCallRequestId(null)
       }
     },
-    [AGORA_APP_ID, WEB_APP_BASE_URL, staffVoiceCall]
+    [AGORA_APP_ID, WEB_APP_BASE_URL, staffVoiceCall, dequeueLiveCall]
   )
 
   const handleDeclineLiveCall = useCallback(async (reqId: string) => {
-    setIncomingLiveCall(null)
+    dequeueLiveCall(reqId)
     try {
-      await supabase.from('requests').update({ status: 'DECLINED' }).eq('id', reqId)
+      await supabase
+        .from('requests')
+        .update({
+          status: 'DECLINED',
+          call_ended_at: new Date().toISOString(),
+        } as any)
+        .eq('id', reqId)
     } catch (err) {
       console.warn('[App] Decline live call error:', err)
     }
-  }, [])
+  }, [dequeueLiveCall])
 
   const handleEndStaffCall = useCallback(async () => {
     const reqId = activeCallRequestId
@@ -408,7 +453,13 @@ function MainAppContent() {
     setActiveCallRoom(null)
     setActiveCallRequestId(null)
     if (reqId) {
-      await supabase.from('requests').update({ status: 'RESOLVED' }).eq('id', reqId)
+      await supabase
+        .from('requests')
+        .update({
+          status: 'RESOLVED',
+          call_ended_at: new Date().toISOString(),
+        } as any)
+        .eq('id', reqId)
     }
   }, [activeCallRequestId, staffVoiceCall])
 
@@ -488,7 +539,7 @@ function MainAppContent() {
 
           const ch = req.agora_channel || req.payload?.channel || `room-${req.room_id}`
           const rN = req.payload?.room_number || 'Guest'
-          setIncomingLiveCall({
+          enqueueLiveCall({
             requestId: req.id,
             roomNumber: String(rN),
             channel: ch,
@@ -888,7 +939,7 @@ function MainAppContent() {
             if (req.request_type === 'LIVE_CALL') {
               const ch = data?.agoraChannel || req.agora_channel || (req.payload as any)?.channel || `room-${req.room_id}`
               const rN = (req.rooms as any)?.room_number || (req.payload as any)?.room_number || 'Room'
-              setIncomingLiveCall({
+              enqueueLiveCall({
                 requestId: req.id,
                 roomNumber: String(rN),
                 channel: ch,
@@ -943,7 +994,7 @@ function MainAppContent() {
             if (req.request_type === 'LIVE_CALL') {
               const ch = data?.agoraChannel || req.agora_channel || (req.payload as any)?.channel || `room-${req.room_id}`
               const rN = (req.rooms as any)?.room_number || (req.payload as any)?.room_number || 'Room'
-              setIncomingLiveCall({
+              enqueueLiveCall({
                 requestId: req.id,
                 roomNumber: String(rN),
                 channel: ch,
@@ -1074,8 +1125,13 @@ function MainAppContent() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, (payload) => {
         fetchStats()
         setRefreshKey(k => k + 1)
-        // If an update or deletion resolved pending items, silently update active reminder list without re-opening
+        // If an update or deletion resolved pending items, silently update active reminder list and call queue
         if (payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
+          const targetId = (payload.new as any)?.id || (payload.old as any)?.id
+          const newStatus = (payload.new as any)?.status
+          if (targetId && (newStatus === 'RESOLVED' || newStatus === 'CANCELLED' || newStatus === 'DECLINED' || payload.eventType === 'DELETE')) {
+            dequeueLiveCall(targetId)
+          }
           setUnhandledPendingList((prev) => {
             if (!prev) return null
             const updated = prev.filter(
@@ -1109,7 +1165,7 @@ function MainAppContent() {
           if (reqType === 'LIVE_CALL') {
             const ch = (payload.new as any)?.agora_channel || (payload.new as any)?.payload?.channel || `room-${(payload.new as any)?.room_id}`
             const rNum = (payload.new as any)?.payload?.room_number || 'Room'
-            setIncomingLiveCall({
+            enqueueLiveCall({
               requestId: reqId,
               roomNumber: String(rNum),
               channel: ch,
@@ -1242,12 +1298,13 @@ function MainAppContent() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
 
-      {/* 📞 Incoming Live Call Overlay */}
-      {incomingLiveCall && (
+      {/* 📞 Incoming Live Call Overlay — Busy Guard: suppressed while staff is on active call */}
+      {!activeCallRoom && incomingCallQueue.length > 0 && (
         <IncomingLiveCallAlert
-          roomNumber={incomingLiveCall.roomNumber}
-          channel={incomingLiveCall.channel}
-          requestId={incomingLiveCall.requestId}
+          roomNumber={incomingCallQueue[0].roomNumber}
+          channel={incomingCallQueue[0].channel}
+          requestId={incomingCallQueue[0].requestId}
+          queueCount={incomingCallQueue.length}
           onAnswer={handleAnswerLiveCall}
           onDecline={handleDeclineLiveCall}
         />
@@ -1260,6 +1317,7 @@ function MainAppContent() {
           callDurationSeconds={staffVoiceCall.callDurationSeconds}
           isMuted={staffVoiceCall.isMuted}
           isSpeakerOn={staffVoiceCall.isSpeakerOn}
+          queuedCallsCount={incomingCallQueue.length}
           onToggleMute={staffVoiceCall.toggleMute}
           onToggleSpeaker={staffVoiceCall.toggleSpeaker}
           onEndCall={handleEndStaffCall}
@@ -1470,16 +1528,6 @@ function MainAppContent() {
         </Text>
       </TouchableOpacity>
 
-      {/* 📞 Incoming Live Voice Call Overlay Alert */}
-      {incomingLiveCall && (
-        <IncomingLiveCallAlert
-          roomNumber={incomingLiveCall.roomNumber}
-          channel={incomingLiveCall.channel}
-          requestId={incomingLiveCall.requestId}
-          onAnswer={handleAnswerLiveCall}
-          onDecline={handleDeclineLiveCall}
-        />
-      )}
 
       {/* 🚨 Incoming Request Aggressive Alert Modal */}
       <IncomingRequestAlert
