@@ -44,9 +44,32 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
     }
   }, [isConnected])
 
+  const cleanupClient = useCallback(async () => {
+    try {
+      if (localTrackRef.current) {
+        localTrackRef.current.stop()
+        localTrackRef.current.close()
+        localTrackRef.current = null
+      }
+      if (clientRef.current) {
+        await clientRef.current.leave()
+        clientRef.current = null
+      }
+    } catch (err) {
+      console.warn('[StaffVoiceCall:Web] Cleanup error:', err)
+    } finally {
+      setIsConnected(false)
+      setIsMuted(false)
+      setIsSpeakerOn(true)
+    }
+  }, [])
+
   const joinChannel = useCallback(
     async (channel: string, token: string | null, appId: string) => {
       try {
+        // Pre-flight cleanup
+        await cleanupClient()
+
         const AgoraRTC = (await import('agora-rtc-sdk-ng')).default
         AgoraRTC.setLogLevel(4)
 
@@ -75,9 +98,9 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
           }
         })
 
-        client.on('user-left', () => {
+        client.on('user-left', async () => {
           console.log('[StaffVoiceCall:Web] Guest left call')
-          setIsConnected(false)
+          await cleanupClient()
           onCallEnded?.()
         })
 
@@ -86,30 +109,20 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
         setIsSpeakerOn(true)
       } catch (err) {
         console.error('[StaffVoiceCall:Web] Join error:', err)
+        await cleanupClient()
         throw err
       }
     },
-    [onCallEnded]
+    [cleanupClient, onCallEnded]
   )
 
   const leaveChannel = useCallback(async () => {
     try {
-      if (localTrackRef.current) {
-        localTrackRef.current.stop()
-        localTrackRef.current.close()
-        localTrackRef.current = null
-      }
-      if (clientRef.current) {
-        await clientRef.current.leave()
-        clientRef.current = null
-      }
-    } catch (err) {
-      console.warn('[StaffVoiceCall:Web] Leave error:', err)
+      await cleanupClient()
     } finally {
-      setIsConnected(false)
       onCallEnded?.()
     }
-  }, [onCallEnded])
+  }, [cleanupClient, onCallEnded])
 
   const toggleMute = useCallback(() => {
     const next = !isMuted
@@ -127,11 +140,9 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
-      localTrackRef.current?.stop()
-      localTrackRef.current?.close()
-      clientRef.current?.leave().catch(() => {})
+      cleanupClient()
     }
-  }, [])
+  }, [cleanupClient])
 
   return {
     isConnected,

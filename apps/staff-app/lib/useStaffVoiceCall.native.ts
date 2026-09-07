@@ -43,9 +43,48 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
     }
   }, [isConnected])
 
+  const cleanupEngine = useCallback(async () => {
+    try {
+      const InCallManagerMod = await import('react-native-incall-manager')
+      const InCallManager = InCallManagerMod.default ?? InCallManagerMod
+      if (InCallManager && typeof InCallManager.stop === 'function') {
+        InCallManager.stop()
+      }
+    } catch (err) {
+      console.warn('[StaffVoiceCall:Native] InCallManager stop error:', err)
+    }
+
+    if (engineRef.current) {
+      const engine = engineRef.current
+      engineRef.current = null
+      try {
+        if (typeof engine.unregisterEventHandler === 'function') {
+          engine.unregisterEventHandler()
+        }
+        if (typeof engine.leaveChannel === 'function') {
+          engine.leaveChannel()
+        }
+        if (typeof engine.release === 'function') {
+          engine.release()
+        } else if (typeof engine.destroy === 'function') {
+          engine.destroy()
+        }
+      } catch (err) {
+        console.warn('[StaffVoiceCall:Native] Engine cleanup error:', err)
+      }
+    }
+
+    setIsConnected(false)
+    setIsMuted(false)
+    setIsSpeakerOn(true)
+  }, [])
+
   const joinChannel = useCallback(
     async (channel: string, token: string | null, appId: string) => {
       try {
+        // Pre-flight cleanup: Ensure any previous lingering connection/engine is cleanly closed
+        await cleanupEngine()
+
         const agoraMod = await import('react-native-agora')
         const InCallManagerMod = await import('react-native-incall-manager')
         const InCallManager = InCallManagerMod.default ?? InCallManagerMod
@@ -76,18 +115,18 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
               console.log('[StaffVoiceCall:Native] Successfully joined channel')
               setIsConnected(true)
             },
-            onError: (err: any, _msg: any) => {
+            onError: async (err: any, _msg: any) => {
               console.error('[StaffVoiceCall:Native] Engine error:', err, _msg)
-              setIsConnected(false)
+              await cleanupEngine()
               onCallEnded?.()
             },
             onUserJoined: (_connection: any, uid: number) => {
               console.log('[StaffVoiceCall:Native] Remote user joined:', uid)
               setIsConnected(true)
             },
-            onUserOffline: (_connection: any, uid: number) => {
+            onUserOffline: async (_connection: any, uid: number) => {
               console.log('[StaffVoiceCall:Native] Remote user left:', uid)
-              setIsConnected(false)
+              await cleanupEngine()
               onCallEnded?.()
             },
           })
@@ -100,9 +139,9 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
             console.log('[StaffVoiceCall:Native] Remote user joined:', uid)
             setIsConnected(true)
           })
-          engine.addListener('UserOffline', (uid: number) => {
+          engine.addListener('UserOffline', async (uid: number) => {
             console.log('[StaffVoiceCall:Native] Remote user left:', uid)
-            setIsConnected(false)
+            await cleanupEngine()
             onCallEnded?.()
           })
         }
@@ -143,37 +182,20 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
         setIsSpeakerOn(true)
       } catch (err) {
         console.error('[StaffVoiceCall:Native] Join error:', err)
+        await cleanupEngine()
         throw err
       }
     },
-    [onCallEnded]
+    [cleanupEngine, onCallEnded]
   )
 
   const leaveChannel = useCallback(async () => {
     try {
-      const InCallManagerMod = await import('react-native-incall-manager')
-      const InCallManager = InCallManagerMod.default ?? InCallManagerMod
-      if (InCallManager && typeof InCallManager.stop === 'function') {
-        InCallManager.stop()
-      }
-      if (engineRef.current) {
-        if (typeof engineRef.current.leaveChannel === 'function') {
-          await engineRef.current.leaveChannel()
-        }
-        if (typeof engineRef.current.release === 'function') {
-          engineRef.current.release()
-        } else if (typeof engineRef.current.destroy === 'function') {
-          engineRef.current.destroy()
-        }
-        engineRef.current = null
-      }
-    } catch (err) {
-      console.warn('[StaffVoiceCall:Native] Leave error:', err)
+      await cleanupEngine()
     } finally {
-      setIsConnected(false)
       onCallEnded?.()
     }
-  }, [onCallEnded])
+  }, [cleanupEngine, onCallEnded])
 
   const toggleMute = useCallback(async () => {
     const next = !isMuted
@@ -194,20 +216,9 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
-      if (engineRef.current) {
-        try {
-          if (typeof engineRef.current.leaveChannel === 'function') {
-            engineRef.current.leaveChannel()
-          }
-          if (typeof engineRef.current.release === 'function') {
-            engineRef.current.release()
-          } else if (typeof engineRef.current.destroy === 'function') {
-            engineRef.current.destroy()
-          }
-        } catch { /* ignore */ }
-      }
+      cleanupEngine()
     }
-  }, [])
+  }, [cleanupEngine])
 
   return {
     isConnected,

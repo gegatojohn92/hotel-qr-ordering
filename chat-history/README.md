@@ -43,6 +43,7 @@ Examples:
 | 2026-09-04 | [2026-09-04_dynamic-theme-content-cms.md](./2026-09-04_dynamic-theme-content-cms.md) | Dynamic Theme & Content CMS: migration 24 (`theme_mode`, `theme_config`, `content_config` on `hotels`), admin branding page (`/admin/branding`), guest web provider + realtime sync, WCAG contrast checks |
 | 2026-09-04 | [2026-09-04_guest-qr-resilience-fix.md](./2026-09-04_guest-qr-resilience-fix.md) | Fixed "Invalid QR Code" crash on guest web: split theme fetch from room validation so missing migration 24 columns don't break QR access |
 | 2026-09-04 | [2026-09-04_supabase-account-migration-guide.md](./2026-09-04_supabase-account-migration-guide.md) | **PENDING** — Step-by-step guide for migrating to a new Supabase account (egress limits reached). Includes data export, new project setup, code updates, and verification steps. |
+| 2026-09-08 | [2026-09-08_fix-agora-reconnect-joinchannel-code-17.md](./2026-09-08_fix-agora-reconnect-joinchannel-code-17.md) | Fixed Agora live call reconnect error `-17` (`ERR_JOIN_CHANNEL_REJECTED`) on staff-app: centralized native/web engine teardown on `onUserOffline`, `onError`, and pre-join. |
 
 ---
 
