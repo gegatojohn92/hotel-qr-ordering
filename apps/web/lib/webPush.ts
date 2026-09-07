@@ -139,7 +139,13 @@ export async function sendWebPushToHotelStaff(
           case 'MAINTENANCE':
             return rType === 'TASK'
           case 'FRONT_DESK':
-            return rType === 'CALL_REQUEST' || rType === 'LIVE_CALL' || rType === 'TASK'
+            return (
+              rType === 'CALL_REQUEST' ||
+              rType === 'LIVE_CALL' ||
+              rType === 'TASK' ||
+              rType === 'CHAT_HANDOFF' ||
+              rType === 'GUEST_CHAT'
+            )
           default:
             return true
         }

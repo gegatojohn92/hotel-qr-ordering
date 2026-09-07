@@ -22,6 +22,7 @@ import SpaTimetable from './components/SpaTimetable'
 import FoodQueue from './components/FoodQueue'
 import TaskQueue from './components/TaskQueue'
 import FunctionRoomModule from './components/FunctionRoomModule'
+import GuestChatModule from './components/GuestChatModule'
 import { StaffUser } from './components/UserManagement'
 import DedicatedCallModule from './components/DedicatedCallModule'
 import RequestHistory from './components/RequestHistory'
@@ -307,6 +308,7 @@ function MainAppContent() {
   const [pendingSpa, setPendingSpa] = useState(0)
   const [pendingFood, setPendingFood] = useState(0)
   const [pendingTasks, setPendingTasks] = useState(0)
+  const [pendingChat, setPendingChat] = useState(0)
   const [totalRequests, setTotalRequests] = useState(0)
   const [resolvedToday, setResolvedToday] = useState(0)
   const [activeStaffUser, setActiveStaffUser] = useState<StaffUser | null>(null)
@@ -714,7 +716,7 @@ function MainAppContent() {
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
 
-    const [callsRes, spaRes, foodRes, taskRes, totalRes, resolvedRes] = await Promise.all([
+    const [callsRes, spaRes, foodRes, taskRes, totalRes, resolvedRes, chatRes] = await Promise.all([
       // Pending call requests
       supabase.from('requests').select('id', { count: 'exact', head: true })
         .eq('hotel_id', HOTEL_ID).eq('request_type', 'CALL_REQUEST').eq('status', 'PENDING'),
@@ -738,6 +740,9 @@ function MainAppContent() {
         .eq('hotel_id', HOTEL_ID)
         .in('status', ['RESOLVED', 'CONFIRMED', 'DECLINED', 'CLAIMED', 'CANCELLED'])
         .gte('created_at', todayStart.toISOString()),
+      // Active guest chat handoffs
+      (supabase as any).from('guest_conversations').select('id', { count: 'exact', head: true })
+        .eq('hotel_id', HOTEL_ID).eq('status', 'STAFF_HANDOFF'),
     ])
 
     setPendingCalls(callsRes.count ?? 0)
@@ -746,6 +751,7 @@ function MainAppContent() {
     setPendingTasks(taskRes.count ?? 0)
     setTotalRequests(totalRes.count ?? 0)
     setResolvedToday(resolvedRes.count ?? 0)
+    setPendingChat(chatRes?.count ?? 0)
   }
 
   const fetchData = async () => {
@@ -963,6 +969,11 @@ function MainAppContent() {
           `FCM High-Priority push was tapped at ${new Date().toLocaleTimeString()}.\n\nBackground delivery is functioning properly!`,
           [{ text: 'OK' }]
         )
+      }
+
+      if (data?.requestType === 'CHAT_HANDOFF' || data?.requestType === 'GUEST_CHAT' || data?.conversationId) {
+        setRefreshKey((k) => k + 1)
+        return
       }
 
       if (data?.requestId && !isTest) {
@@ -1480,6 +1491,7 @@ function MainAppContent() {
                 { icon: '🍽️', label: 'Food Orders', badge: String(pendingFood), color: '#34d399' },
               ] : [
                 { icon: '📞', label: 'Call Queue',   badge: String(pendingCalls), color: COLORS.gold },
+                { icon: '💬', label: 'Guest Chat',   badge: String(pendingChat),  color: '#f59e0b' },
                 { icon: '💆', label: 'Spa Bookings', badge: String(pendingSpa),   color: '#a78bfa' },
                 { icon: '🍽️', label: 'Food Orders',  badge: String(pendingFood),  color: '#34d399' },
                 { icon: '🛎️', label: 'Room Tasks',   badge: String(pendingTasks), color: '#60a5fa' },
@@ -1530,10 +1542,19 @@ function MainAppContent() {
             {/* 4. Function Room Booking & Schedule Module */}
             <FunctionRoomModule activeStaffUser={activeStaffUser} />
 
-            {/* 5. Food Orders Queue (Always visible to Kitchen, Admin, Front Desk) */}
+            {/* 5. Guest Chat Module (Real-time AI + Staff Handoff) */}
+            {activeStaffUser?.role !== 'KITCHEN' && (
+              <GuestChatModule
+                activeStaffUser={activeStaffUser}
+                hotelId={HOTEL_ID}
+                webAppBaseUrl={WEB_APP_BASE_URL}
+              />
+            )}
+
+            {/* 6. Food Orders Queue (Always visible to Kitchen, Admin, Front Desk) */}
             <FoodQueue activeStaffId={activeStaffUser?.id} activeStaffUser={activeStaffUser} refreshTrigger={refreshKey} />
 
-            {/* 6. All Request History Logs */}
+            {/* 7. All Request History Logs */}
             <RequestHistory refreshTrigger={refreshKey} />
 
           </Animated.View>

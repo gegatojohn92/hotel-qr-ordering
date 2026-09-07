@@ -322,6 +322,40 @@ export interface FunctionRoomBooking {
   created_at: string
 }
 
+// ── Real-Time Guest & Staff Chat with Hybrid AI Assistant ───
+
+export type GuestConversationStatus = 'BOT_ACTIVE' | 'STAFF_HANDOFF' | 'RESOLVED'
+export type GuestChatSenderType = 'GUEST' | 'AI' | 'STAFF' | 'SYSTEM'
+
+export interface GuestConversation {
+  id: string
+  hotel_id: string
+  room_id: string
+  status: GuestConversationStatus
+  assigned_staff_id: string | null
+  guest_name: string | null
+  unread_guest_count: number
+  unread_staff_count: number
+  last_message_text: string | null
+  last_message_sender: GuestChatSenderType | null
+  last_message_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GuestChatMessage {
+  id: string
+  conversation_id: string
+  hotel_id: string
+  room_id: string
+  sender_type: GuestChatSenderType
+  sender_staff_id: string | null
+  sender_name: string
+  message_text: string
+  is_read: boolean
+  created_at: string
+}
+
 export interface BookingFormInputs {
   function_room_id: string
   booker_name: string
@@ -505,6 +539,20 @@ export interface Database {
         Row: FunctionRoomBooking
         Insert: Omit<FunctionRoomBooking, 'id' | 'created_at'> & { id?: string; created_at?: string }
         Update: Partial<Omit<FunctionRoomBooking, 'id'>>
+      }
+      guest_conversations: {
+        Row: GuestConversation
+        Insert: Omit<GuestConversation, 'id' | 'created_at' | 'updated_at'> & {
+          id?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Omit<GuestConversation, 'id'>>
+      }
+      guest_chat_messages: {
+        Row: GuestChatMessage
+        Insert: Omit<GuestChatMessage, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Update: Partial<Omit<GuestChatMessage, 'id'>>
       }
     }
     Views: Record<string, never>

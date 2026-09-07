@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import GuestSessionKeeper from './GuestSessionKeeper'
+import GuestChatWidget from './GuestChatWidget'
 
 const supabase = createSupabaseBrowserClient()
 
@@ -59,6 +60,8 @@ export default function StayRootClientWrapper({ children }: { children: React.Re
     <>
       <Suspense fallback={null}>
         <StayRootManager />
+        {/* Global persistent chat widget across all stay subroutes */}
+        <GuestChatWidget />
       </Suspense>
       {children}
     </>

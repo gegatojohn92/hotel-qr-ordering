@@ -221,4 +221,10 @@ Prompt 5.3 — Executive ROI Analytics Dashboard (Next.js)
 Prompt 5.4 — Staff App Escalation Banners (Expo)
 "In apps/staff-app: Listen via Supabase Realtime for requests where status = 'ESCALATED_L1'
 or 'ESCALATED_L2'. Render a bold flashing red banner across overdue tickets: '⚠️ OVERDUE
-- ESCALATED TO MANAGER' and move them
+- ESCALATED TO MANAGER' and move them to the top of the queue."
+
+💬 Phase 6: Real-Time Guest & Staff Chat with Hybrid AI Assistant
+- Hybrid AI Concierge: Instant automated replies for hotel policies, dining, and spa via Gemini Flash REST API with comprehensive rule-based fallback.
+- Human Staff Escalation: One-tap handoff from AI to Front Desk with high-priority FCM push notifications.
+- Guest Web Chat Widget: Persistent floating action button with live unread badge, glassmorphic UI, typing indicators, and quick-prompt chips.
+- Staff App Messaging Queue: Dedicated tab with status filtering (Active Handoffs, AI Bot Managed, Resolved), AI Smart Reply suggestions, and 1-tap claim/resolve actions.
