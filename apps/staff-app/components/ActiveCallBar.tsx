@@ -12,6 +12,7 @@ interface ActiveCallBarProps {
   callDurationSeconds: number
   isMuted: boolean
   isSpeakerOn: boolean
+  queuedCallsCount?: number
   onToggleMute: () => void
   onToggleSpeaker: () => void
   onEndCall: () => void
@@ -28,6 +29,7 @@ export default function ActiveCallBar({
   callDurationSeconds,
   isMuted,
   isSpeakerOn,
+  queuedCallsCount = 0,
   onToggleMute,
   onToggleSpeaker,
   onEndCall,
@@ -55,6 +57,11 @@ export default function ActiveCallBar({
           <Text style={styles.liveLabel}>LIVE CALL</Text>
           <Text style={styles.roomText}>Room {roomNumber}</Text>
         </View>
+        {queuedCallsCount > 0 && (
+          <View style={styles.queueBadge}>
+            <Text style={styles.queueBadgeText}>+{queuedCallsCount} Waiting</Text>
+          </View>
+        )}
       </View>
 
       {/* Timer */}
@@ -114,6 +121,19 @@ const styles = StyleSheet.create({
     color: '#f0fdf4',
     fontSize: 13,
     fontWeight: '700',
+  },
+  queueBadge: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginLeft: 6,
+  },
+  queueBadgeText: {
+    color: '#0f172a',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   timer: {
     color: '#86efac',

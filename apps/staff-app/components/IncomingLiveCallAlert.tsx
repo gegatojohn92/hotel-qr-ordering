@@ -12,6 +12,7 @@ interface IncomingLiveCallAlertProps {
   roomNumber: string
   channel: string
   requestId: string
+  queueCount?: number
   onAnswer: (channel: string, requestId: string) => void
   onDecline: (requestId: string) => void
 }
@@ -22,6 +23,7 @@ export default function IncomingLiveCallAlert({
   roomNumber,
   channel,
   requestId,
+  queueCount = 1,
   onAnswer,
   onDecline,
 }: IncomingLiveCallAlertProps) {
@@ -66,7 +68,14 @@ export default function IncomingLiveCallAlert({
       <View style={styles.card}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerLabel}>INCOMING LIVE CALL</Text>
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerLabel}>INCOMING LIVE CALL</Text>
+            {queueCount > 1 && (
+              <View style={styles.queueBadge}>
+                <Text style={styles.queueBadgeText}>1 of {queueCount} Waiting</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.countdown}>{countdown}s</Text>
         </View>
 
@@ -130,8 +139,14 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     width: '100%',
     marginBottom: 20,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   headerLabel: {
     color: '#6366f1',
@@ -139,6 +154,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
+  },
+  queueBadge: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  queueBadgeText: {
+    color: '#0f172a',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   countdown: {
     color: '#94a3b8',

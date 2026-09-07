@@ -94,9 +94,15 @@ export function useStaffVoiceCall({ onCallEnded }: UseStaffVoiceCallOptions = {}
 
   const leaveChannel = useCallback(async () => {
     try {
-      localTrackRef.current?.stop()
-      localTrackRef.current?.close()
-      await clientRef.current?.leave()
+      if (localTrackRef.current) {
+        localTrackRef.current.stop()
+        localTrackRef.current.close()
+        localTrackRef.current = null
+      }
+      if (clientRef.current) {
+        await clientRef.current.leave()
+        clientRef.current = null
+      }
     } catch (err) {
       console.warn('[StaffVoiceCall:Web] Leave error:', err)
     } finally {

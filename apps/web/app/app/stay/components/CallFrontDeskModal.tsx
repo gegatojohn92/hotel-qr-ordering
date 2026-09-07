@@ -1,8 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import PhoneCaptureModal, { getStoredGuestPhone } from './PhoneCaptureModal'
+import MicPermissionModal from './MicPermissionModal'
+import OngoingCallNoticeModal from './OngoingCallNoticeModal'
+import { checkActiveHotelCall, cancelLiveCallRequest } from '@/lib/callQueueService'
 import { useGuestTheme } from './GuestThemeProvider'
 import { useGuestVoiceCall } from './GuestVoiceCallEngine'
 
@@ -34,6 +37,9 @@ export default function CallFrontDeskModal({
   const [status, setStatus] = useState<'IDLE' | 'PENDING' | 'CLAIMED' | 'FAILED' | 'VOICE_JOINING' | 'VOICE_LIVE' | 'VOICE_ENDED'>('IDLE')
   const [countdown, setCountdown] = useState(180) // 3 minutes
   const [showPhoneModal, setShowPhoneModal] = useState(false)
+  const [showMicModal, setShowMicModal] = useState(false)
+  const [showOngoingCallModal, setShowOngoingCallModal] = useState(false)
+  const [agoraError, setAgoraError] = useState<string | null>(null)
 
   // Agora voice call state
   const [agoraChannel, setAgoraChannel] = useState<string>('')
@@ -41,6 +47,7 @@ export default function CallFrontDeskModal({
 
   // Admin-controlled Live Voice Call visibility (notification_settings.enable_guest_live_call)
   const [liveCallEnabled, setLiveCallEnabled] = useState<boolean>(true)
+  const isInitiatingRef = useRef(false)
 
   useEffect(() => {
     if (!isOpen) return
@@ -65,12 +72,24 @@ export default function CallFrontDeskModal({
     fetchLiveCallSetting()
   }, [isOpen, hotelId])
 
+  const handleStaffLeft = useCallback(() => {
+    console.log('[CallFrontDeskModal] Staff left call, terminating guest session')
+    setStatus('VOICE_ENDED')
+  }, [])
+
+  const handleConnectionFailure = useCallback((reason: string) => {
+    console.warn('[CallFrontDeskModal] Agora connection failure:', reason)
+    setAgoraError(reason)
+  }, [])
+
   const isVoiceActive = status === 'VOICE_LIVE'
-  const voiceCall = useGuestVoiceCall(
-    isVoiceActive
-      ? { appId: AGORA_APP_ID, channel: agoraChannel, token: agoraToken }
-      : { appId: '', channel: '', token: null }
-  )
+  const voiceCall = useGuestVoiceCall({
+    appId: isVoiceActive ? AGORA_APP_ID : '',
+    channel: isVoiceActive ? agoraChannel : '',
+    token: isVoiceActive ? agoraToken : null,
+    onStaffLeft: handleStaffLeft,
+    onConnectionFailure: handleConnectionFailure,
+  })
 
   // Countdown timer effect for PENDING state
   useEffect(() => {
@@ -83,7 +102,7 @@ export default function CallFrontDeskModal({
     return () => clearInterval(timer)
   }, [status, countdown])
 
-  // Supabase Realtime Subscription — watch for CLAIMED or LIVE
+  // Supabase Realtime Subscription — watch for CLAIMED, LIVE, or RESOLVED
   useEffect(() => {
     if (!requestId) return
 
@@ -97,14 +116,15 @@ export default function CallFrontDeskModal({
           table: 'requests',
           filter: `id=eq.${requestId}`,
         },
-        (payload: { new: { status: string } }) => {
+        (payload: { new: { status: string; request_type?: string } }) => {
           if (payload.new?.status === 'CLAIMED') {
-            setStatus('CLAIMED')
+            // For live voice calls, CLAIMED means staff answered! Keep the call interface live.
+            setStatus((prev) => (prev === 'VOICE_LIVE' || prev === 'VOICE_JOINING' ? 'VOICE_LIVE' : 'CLAIMED'))
           }
           if (payload.new?.status === 'LIVE') {
             setStatus('VOICE_LIVE')
           }
-          if (payload.new?.status === 'RESOLVED') {
+          if (payload.new?.status === 'RESOLVED' || payload.new?.status === 'DECLINED' || payload.new?.status === 'CANCELLED') {
             setStatus('VOICE_ENDED')
             voiceCall.endCall()
           }
@@ -113,7 +133,20 @@ export default function CallFrontDeskModal({
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [requestId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [requestId, voiceCall])
+
+  // Cleanup beacon/cancellation if guest closes browser tab mid-call
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (requestId && (status === 'VOICE_LIVE' || status === 'VOICE_JOINING')) {
+        cancelLiveCallRequest(requestId)
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [requestId, status])
 
   const executeRequestCall = async (phoneOverride?: string) => {
     setIsSubmitting(true)
@@ -174,12 +207,25 @@ export default function CallFrontDeskModal({
     }
   }
 
-  // ── Live Voice Call flow ────────────────────────────────────────────────
-  const handleLiveVoiceCall = useCallback(async () => {
-    if (!liveCallEnabled) return
+  // ── Pre-flight checks before joining voice call ─────────────────────────
+  const startLiveCallSession = useCallback(async () => {
+    if (isInitiatingRef.current) return
+    isInitiatingRef.current = true
     setStatus('VOICE_JOINING')
+    setAgoraError(null)
+
     try {
-      // 1. Get Agora token from server
+      // 1. Check if front desk line is already occupied by another caller
+      const queueState = await checkActiveHotelCall(hotelId, roomId)
+      if (queueState.hasActiveCall) {
+        console.log('[CallFrontDeskModal] Front desk line is currently busy:', queueState)
+        setShowOngoingCallModal(true)
+        setStatus('IDLE')
+        isInitiatingRef.current = false
+        return
+      }
+
+      // 2. Get Agora token from server
       const channelName = `room-${roomId}-${Date.now()}`
       const res = await fetch(`/api/agora/token?channel=${channelName}&uid=1`)
       const { token } = await res.json()
@@ -187,7 +233,7 @@ export default function CallFrontDeskModal({
       setAgoraChannel(channelName)
       setAgoraToken(token ?? null)
 
-      // 2. Insert LIVE_CALL request in Supabase
+      // 3. Insert LIVE_CALL request in Supabase
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase.from('requests') as any)
         .insert([{
@@ -206,7 +252,7 @@ export default function CallFrontDeskModal({
       setRequestId(data.id)
       setStatus('VOICE_LIVE') // Guest joins Agora immediately; staff answers when ready
 
-      // 3. Fire FCM push to staff
+      // 4. Fire FCM push to staff
       fetch('/api/push/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,23 +270,68 @@ export default function CallFrontDeskModal({
     } catch (err) {
       console.error('[LiveVoiceCall] Setup error:', err)
       setStatus('IDLE')
+    } finally {
+      isInitiatingRef.current = false
     }
-  }, [hotelId, roomId, roomNumber, liveCallEnabled])
+  }, [hotelId, roomId, roomNumber])
+
+  // Click handler for Live Voice Call button
+  const handleLiveVoiceCall = useCallback(async () => {
+    if (!liveCallEnabled) return
+
+    // Pre-flight check: microphone permission
+    try {
+      if (typeof window !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+        if (navigator.permissions && navigator.permissions.query) {
+          try {
+            const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+            if (perm.state === 'denied') {
+              setShowMicModal(true)
+              return
+            }
+            if (perm.state === 'prompt') {
+              setShowMicModal(true)
+              return
+            }
+          } catch {
+            // Some browsers reject query for microphone, fallback to direct check below
+          }
+        }
+
+        // Quick test to confirm mic access is active
+        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        testStream.getTracks().forEach((track) => track.stop())
+      } else {
+        setShowMicModal(true)
+        return
+      }
+    } catch {
+      // Permission prompt was blocked or dismissed
+      setShowMicModal(true)
+      return
+    }
+
+    // Permission granted, start call session
+    startLiveCallSession()
+  }, [liveCallEnabled, startLiveCallSession])
 
   const handleEndLiveCall = useCallback(async () => {
     await voiceCall.endCall()
     if (requestId) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase.from('requests') as any)
-        .update({ status: 'RESOLVED' })
+        .update({
+          status: 'RESOLVED',
+          call_ended_at: new Date().toISOString(),
+        })
         .eq('id', requestId)
     }
     setStatus('VOICE_ENDED')
   }, [voiceCall, requestId])
 
-  const formatCountdown = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
+  const formatSeconds = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60)
+    const secs = totalSec % 60
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
@@ -338,23 +429,45 @@ export default function CallFrontDeskModal({
           {/* ── State: VOICE_LIVE ────────────────────────────────── */}
           {status === 'VOICE_LIVE' && (
             <div className="text-center py-4 space-y-5">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold text-green-400 bg-green-400/10 border border-green-400/25">
+              <div
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold ${
+                  voiceCall.remoteUserJoined
+                    ? 'text-green-400 bg-green-400/10 border border-green-400/25'
+                    : 'text-amber-400 bg-amber-400/10 border border-amber-400/25'
+                }`}
+              >
                 <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400" />
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      voiceCall.remoteUserJoined ? 'bg-green-400' : 'bg-amber-400'
+                    }`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                      voiceCall.remoteUserJoined ? 'bg-green-400' : 'bg-amber-400'
+                    }`}
+                  />
                 </span>
-                {voiceCall.isConnected ? 'Connected — Staff Joined' : 'Waiting for staff…'}
+                {voiceCall.remoteUserJoined
+                  ? `Connected · ${formatSeconds(voiceCall.callDurationSeconds)}`
+                  : 'Calling Front Desk…'}
               </div>
 
               <div className="text-6xl">
                 {voiceCall.isMuted ? '🔇' : '🎤'}
               </div>
 
-              <p className="text-slate-300 text-sm">
-                {voiceCall.isConnected
-                  ? 'You\'re speaking with Front Desk'
-                  : 'Staff has been alerted. Please wait…'}
+              <p className="text-slate-300 text-sm font-medium">
+                {voiceCall.remoteUserJoined
+                  ? "You're speaking with Front Desk"
+                  : 'Front desk staff alerted. Ringing…'}
               </p>
+
+              {agoraError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                  {agoraError}
+                </div>
+              )}
 
               <div className="flex gap-3 justify-center">
                 {/* Mute toggle */}
@@ -393,6 +506,7 @@ export default function CallFrontDeskModal({
             <div className="text-center py-6 space-y-4 animate-fade-in">
               <div className="text-5xl">📵</div>
               <p className="text-white font-bold text-lg">Call Ended</p>
+              <p className="text-slate-400 text-xs">Thank you for contacting Front Desk.</p>
               <button
                 onClick={onClose}
                 className="w-full py-4 rounded-2xl font-bold text-slate-200 bg-white/8 hover:bg-white/15 transition-all active:scale-95 min-h-[56px]"
@@ -414,7 +528,7 @@ export default function CallFrontDeskModal({
               </div>
 
               <div className="text-5xl font-mono font-extrabold text-white tracking-widest">
-                {formatCountdown(countdown)}
+                {formatSeconds(countdown)}
               </div>
 
               <p className="text-slate-300 text-sm leading-relaxed max-w-xs mx-auto">
@@ -477,6 +591,31 @@ export default function CallFrontDeskModal({
         }}
         roomId={roomId}
         hotelId={hotelId}
+      />
+
+      <MicPermissionModal
+        isOpen={showMicModal}
+        onClose={() => setShowMicModal(false)}
+        onGranted={() => {
+          setShowMicModal(false)
+          startLiveCallSession()
+        }}
+      />
+
+      <OngoingCallNoticeModal
+        isOpen={showOngoingCallModal}
+        onClose={() => setShowOngoingCallModal(false)}
+        onLineFree={() => {
+          setShowOngoingCallModal(false)
+          startLiveCallSession()
+        }}
+        onRequestCallback={() => {
+          setShowOngoingCallModal(false)
+          handleRequestCall()
+        }}
+        hotelId={hotelId}
+        currentRoomId={roomId}
+        roomNumber={roomNumber}
       />
     </>
   )

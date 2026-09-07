@@ -18,8 +18,12 @@ export async function GET(req: NextRequest) {
   const channel = searchParams.get('channel')
   const uid = parseInt(searchParams.get('uid') ?? '1', 10)
 
-  if (!channel) {
-    return NextResponse.json({ error: 'channel is required' }, { status: 400 })
+  if (!channel || !/^[a-zA-Z0-9_\-\.]+$/.test(channel)) {
+    return NextResponse.json({ error: 'valid channel name is required' }, { status: 400 })
+  }
+
+  if (isNaN(uid) || uid <= 0) {
+    return NextResponse.json({ error: 'valid positive integer uid is required' }, { status: 400 })
   }
 
   if (!APP_ID) {

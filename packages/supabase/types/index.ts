@@ -109,11 +109,16 @@ export interface RequestItem {
   hotel_id: string
   room_id: string
   request_type: 'CALL_REQUEST' | 'SPA_BOOKING' | 'FOOD_ORDER' | 'TASK' | string
-  status: 'PENDING' | 'PENDING_ON_CALL' | 'CLAIMED' | 'CONFIRMED' | 'DECLINED' | 'PREPARING' | 'RESOLVED' | 'CANCELLED' | 'ESCALATED_L1'
+  status: 'PENDING' | 'PENDING_ON_CALL' | 'CLAIMED' | 'LIVE' | 'CONFIRMED' | 'DECLINED' | 'PREPARING' | 'RESOLVED' | 'CANCELLED' | 'ESCALATED_L1'
   payload: Json
   created_at: string
   claimed_at: string | null
   claimed_by: string | null
+  agora_channel?: string | null
+  claimed_by_staff_id?: string | null
+  call_started_at?: string | null
+  call_ended_at?: string | null
+  call_queue_position?: number | null
 }
 
 export type DietaryTag = 'VEGETARIAN' | 'VEGAN' | 'GLUTEN_FREE' | 'HALAL' | 'NUT_FREE' | 'DAIRY_FREE'
@@ -400,6 +405,11 @@ export interface Database {
           created_at?: string
           claimed_at?: string | null
           claimed_by?: string | null
+          agora_channel?: string | null
+          claimed_by_staff_id?: string | null
+          call_started_at?: string | null
+          call_ended_at?: string | null
+          call_queue_position?: number | null
         }
         Update: {
           hotel_id?: string
@@ -409,6 +419,11 @@ export interface Database {
           payload?: Json
           claimed_at?: string | null
           claimed_by?: string | null
+          agora_channel?: string | null
+          claimed_by_staff_id?: string | null
+          call_started_at?: string | null
+          call_ended_at?: string | null
+          call_queue_position?: number | null
         }
       }
       catalog_items: {
