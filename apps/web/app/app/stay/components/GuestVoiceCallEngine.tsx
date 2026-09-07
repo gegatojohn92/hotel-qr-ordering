@@ -97,12 +97,15 @@ export function useGuestVoiceCall({
           }
         })
 
+        let hasRemoteJoined = false
+
         // Auto-play remote audio streams (staff speaking)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         client.on('user-published', async (user: any, mediaType: 'audio' | 'video') => {
           await client.subscribe(user, mediaType)
           if (mediaType === 'audio') {
             user.audioTrack?.play()
+            hasRemoteJoined = true
             if (isMounted) setRemoteUserJoined(true)
           }
         })
@@ -111,6 +114,7 @@ export function useGuestVoiceCall({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         client.on('user-joined', (user: any) => {
           console.log('[GuestVoiceCall] Remote user joined:', user.uid)
+          hasRemoteJoined = true
           if (isMounted) setRemoteUserJoined(true)
         })
 
@@ -123,10 +127,17 @@ export function useGuestVoiceCall({
         })
 
         // Immediate cleanup when staff drops the call or disconnects
+        // Only tear down if the user that left is staff (UID 2 or remote user that had previously joined)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         client.on('user-left', async (user: any, reason: string) => {
           console.log('[GuestVoiceCall] Remote user left channel:', user.uid, reason)
           if (!isMounted) return
+
+          // Guard: If staff never actually joined, ignore spurious user-left signals
+          if (!hasRemoteJoined && user.uid !== 2 && user.uid !== '2') {
+            console.log('[GuestVoiceCall] Non-staff or pre-join user-left event ignored:', user.uid)
+            return
+          }
 
           // Immediate local track teardown to prevent lingering mic usage
           try {

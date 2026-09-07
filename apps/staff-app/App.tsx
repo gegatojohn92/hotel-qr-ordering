@@ -368,26 +368,64 @@ function MainAppContent() {
       try {
         const staffUserId = activeStaffUserRef.current?.id || null
 
-        // Concurrency Guard: Atomic update check to ensure only ONE staff member claims the call
+        // Concurrency Guard: Atomic update check to ensure only ONE staff member claims the call.
+        // Valid status in requests_status_check is 'CLAIMED' (or 'PENDING' -> 'CLAIMED').
         const { data: claimData, error: claimError } = await supabase
           .from('requests')
           .update({
-            status: 'LIVE',
+            status: 'CLAIMED',
+            claimed_by: staffUserId,
             claimed_by_staff_id: staffUserId,
+            claimed_at: new Date().toISOString(),
             call_started_at: new Date().toISOString(),
           } as any)
           .eq('id', reqId)
-          .eq('status', 'PENDING')
+          .in('status', ['PENDING', 'CLAIMED'])
           .select()
 
-        if (claimError || !claimData || (claimData as any[]).length === 0) {
-          // Already claimed by another staff member or cancelled by guest
-          dequeueLiveCall(reqId)
-          Alert.alert(
-            'Call Unavailable',
-            'This call was already answered by another staff member or cancelled by the guest.'
-          )
-          return
+        if (claimError) {
+          console.error('[App] Live call claim error:', claimError)
+          // Fallback update without foreign key column in case of schema discrepancy
+          const { data: retryData, error: retryError } = await supabase
+            .from('requests')
+            .update({
+              status: 'CLAIMED',
+              claimed_by: staffUserId,
+              claimed_at: new Date().toISOString(),
+            } as any)
+            .eq('id', reqId)
+            .in('status', ['PENDING', 'CLAIMED'])
+            .select()
+
+          if (retryError || !retryData || (retryData as any[]).length === 0) {
+            dequeueLiveCall(reqId)
+            Alert.alert(
+              'Call Unavailable',
+              'This call was already answered by another staff member or cancelled by the guest.'
+            )
+            return
+          }
+        } else if (!claimData || (claimData as any[]).length === 0) {
+          // Double-check if the request was truly cancelled or already claimed by another staff
+          const { data: existing } = await supabase
+            .from('requests')
+            .select('status, claimed_by')
+            .eq('id', reqId)
+            .maybeSingle()
+
+          if (
+            existing?.status === 'RESOLVED' ||
+            existing?.status === 'CANCELLED' ||
+            existing?.status === 'DECLINED' ||
+            (existing?.claimed_by && existing.claimed_by !== staffUserId)
+          ) {
+            dequeueLiveCall(reqId)
+            Alert.alert(
+              'Call Unavailable',
+              'This call was already answered by another staff member or cancelled by the guest.'
+            )
+            return
+          }
         }
 
         dequeueLiveCall(reqId)

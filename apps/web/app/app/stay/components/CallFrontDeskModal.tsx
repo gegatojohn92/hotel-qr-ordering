@@ -116,9 +116,10 @@ export default function CallFrontDeskModal({
           table: 'requests',
           filter: `id=eq.${requestId}`,
         },
-        (payload: { new: { status: string } }) => {
+        (payload: { new: { status: string; request_type?: string } }) => {
           if (payload.new?.status === 'CLAIMED') {
-            setStatus('CLAIMED')
+            // For live voice calls, CLAIMED means staff answered! Keep the call interface live.
+            setStatus((prev) => (prev === 'VOICE_LIVE' || prev === 'VOICE_JOINING' ? 'VOICE_LIVE' : 'CLAIMED'))
           }
           if (payload.new?.status === 'LIVE') {
             setStatus('VOICE_LIVE')
