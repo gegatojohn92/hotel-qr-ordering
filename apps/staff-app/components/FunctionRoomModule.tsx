@@ -49,6 +49,7 @@ type FunctionRoomBooking = {
   booker_name: string
   phone_number: string | null
   booking_date: string
+  booking_date_end: string
   start_time: string
   end_time: string
   food_budget: number
@@ -68,6 +69,7 @@ type BookingFormState = {
   booker_name: string
   phone_number: string
   booking_date: string
+  booking_date_end: string
   start_time: string
   end_time: string
   food_budget: string
@@ -84,6 +86,7 @@ const DEFAULT_FORM: BookingFormState = {
   booker_name: '',
   phone_number: '',
   booking_date: new Date().toISOString().slice(0, 10),
+  booking_date_end: new Date().toISOString().slice(0, 10),
   start_time: '09:00',
   end_time: '11:00',
   food_budget: '0',
@@ -195,12 +198,16 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
     }
   }, [])
 
-  const hasBookingOverlap = (roomId: string, date: string, start: string, end: string, ignoreId?: string) => {
+  const hasBookingOverlap = (roomId: string, dateStart: string, dateEnd: string, start: string, end: string, ignoreId?: string) => {
     return bookings.some((booking) => {
       const roomIds = booking.function_room_ids && booking.function_room_ids.length > 0 ? booking.function_room_ids : [booking.function_room_id]
-      if (!roomIds.includes(roomId) || booking.booking_date !== date) return false
+      if (!roomIds.includes(roomId)) return false
       if (ignoreId && booking.id === ignoreId) return false
       if (!['PENDING', 'CONFIRMED'].includes(booking.status)) return false
+      // Date range overlap: new range overlaps existing if new start <= existing end AND new end >= existing start
+      const bookingEnd = booking.booking_date_end || booking.booking_date
+      if (dateStart > bookingEnd || dateEnd < booking.booking_date) return false
+      // Time slot overlap within the overlapping days
       return start < booking.end_time && end > booking.start_time
     })
   }
@@ -218,8 +225,13 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
 
     const selectedRoomIds = form.selectedRoomIds.length > 0 ? form.selectedRoomIds : [form.function_room_id]
 
-    if (!selectedRoomIds.length || !form.booker_name.trim() || !form.booking_date || !form.start_time || !form.end_time) {
+    if (!selectedRoomIds.length || !form.booker_name.trim() || !form.booking_date || !form.booking_date_end || !form.start_time || !form.end_time) {
       setError('Please complete all required booking fields.')
+      return
+    }
+
+    if (form.booking_date_end < form.booking_date) {
+      setError('End date must be on or after the start date.')
       return
     }
 
@@ -245,6 +257,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
       booker_name: form.booker_name.trim(),
       phone_number: form.phone_number.trim() || null,
       booking_date: form.booking_date,
+      booking_date_end: form.booking_date_end,
       start_time: form.start_time,
       end_time: form.end_time,
       food_budget: parseNumber(form.food_budget),
@@ -295,6 +308,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
             booker_name: form.booker_name.trim(),
             phone_number: form.phone_number.trim() || null,
             booking_date: form.booking_date,
+            booking_date_end: form.booking_date_end,
             start_time: form.start_time,
             end_time: form.end_time,
             room_name: roomNameSummary(selectedRoomIds),
@@ -335,6 +349,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
             room_name: roomNameSummary(selectedRoomIds),
             booker_name: form.booker_name.trim(),
             booking_date: form.booking_date,
+            booking_date_end: form.booking_date_end,
             start_time: form.start_time,
             end_time: form.end_time,
             food_budget: parseNumber(form.food_budget),
@@ -349,8 +364,8 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
         Alert.alert('Booking updated', 'The function room booking was updated successfully.')
       } else {
         for (const roomId of selectedRoomIds) {
-          if (hasBookingOverlap(roomId, form.booking_date, form.start_time, form.end_time)) {
-            setError('One or more selected rooms already have a booking in the chosen time slot.')
+          if (hasBookingOverlap(roomId, form.booking_date, form.booking_date_end, form.start_time, form.end_time)) {
+            setError('One or more selected rooms already have a booking in the chosen date range and time slot.')
             return
           }
         }
@@ -380,6 +395,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
             booker_name: row.booker_name,
             phone_number: row.phone_number,
             booking_date: row.booking_date,
+            booking_date_end: row.booking_date_end || row.booking_date,
             start_time: row.start_time,
             end_time: row.end_time,
             room_name: row.room_names || roomNameSummary(row.function_room_ids || [row.function_room_id]),
@@ -426,6 +442,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
                 room_name: row.room_names || roomNameSummary(row.function_room_ids || [row.function_room_id]),
                 room_names: row.room_names || roomNameSummary(row.function_room_ids || [row.function_room_id]),
                 booking_date: row.booking_date,
+                booking_date_end: row.booking_date_end || row.booking_date,
                 start_time: row.start_time,
                 end_time: row.end_time,
                 food_budget: row.food_budget,
@@ -478,6 +495,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
       booker_name: booking.booker_name,
       phone_number: booking.phone_number || '',
       booking_date: booking.booking_date,
+      booking_date_end: booking.booking_date_end || booking.booking_date,
       start_time: booking.start_time,
       end_time: booking.end_time,
       food_budget: String(booking.food_budget ?? 0),
@@ -611,7 +629,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
         <Text style={styles.detailRowText}>Booker: {payload?.booker_name || '—'}</Text>
         <Text style={styles.detailRowText}>Phone: {payload?.phone_number || 'Not provided'}</Text>
         <Text style={styles.detailRowText}>Rooms: {roomNames}</Text>
-        <Text style={styles.detailRowText}>Date: {formatDateLabel(payload?.booking_date || '')}</Text>
+        <Text style={styles.detailRowText}>Date: {formatDateLabel(payload?.booking_date || '')}{(payload?.booking_date_end && payload.booking_date_end !== payload.booking_date) ? ` – ${formatDateLabel(payload.booking_date_end)}` : ''}</Text>
         <Text style={styles.detailRowText}>Time: {payload?.start_time || '—'} - {payload?.end_time || '—'}</Text>
         <Text style={styles.detailRowText}>Food budget: {formatCurrency(Number(payload?.food_budget || 0))}</Text>
         <Text style={styles.detailRowText}>Banquet notes: {payload?.banquet_food_notes || 'None'}</Text>
@@ -628,7 +646,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
         <TouchableOpacity activeOpacity={0.8} onPress={() => setExpanded((prev) => !prev)} style={styles.headerTitleWrap}>
           <Text style={styles.title}>🏛️ Function Rooms</Text>
           <Text style={styles.subtitle}>
-            {expanded ? 'Tap to minimize' : nextBooking ? `Next: ${nextBooking.booker_name} • ${formatDateLabel(nextBooking.booking_date)}` : 'No upcoming bookings'}
+            {expanded ? 'Tap to minimize' : nextBooking ? `Next: ${nextBooking.booker_name} • ${formatDateLabel(nextBooking.booking_date)}${(nextBooking.booking_date_end && nextBooking.booking_date_end !== nextBooking.booking_date) ? ` – ${formatDateLabel(nextBooking.booking_date_end)}` : ''}` : 'No upcoming bookings'}
           </Text>
         </TouchableOpacity>
 
@@ -648,7 +666,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
           {nextBooking ? (
             <>
               <Text style={styles.summaryTitle}>{nextBooking.booker_name}</Text>
-              <Text style={styles.summaryMeta}>{roomNameMap.get(nextBooking.function_room_id) || 'Function room'} • {formatDateLabel(nextBooking.booking_date)}</Text>
+              <Text style={styles.summaryMeta}>{roomNameMap.get(nextBooking.function_room_id) || 'Function room'} • {formatDateLabel(nextBooking.booking_date)}{(nextBooking.booking_date_end && nextBooking.booking_date_end !== nextBooking.booking_date) ? ` – ${formatDateLabel(nextBooking.booking_date_end)}` : ''}</Text>
               <Text style={styles.summaryMeta}>{nextBooking.start_time} - {nextBooking.end_time}</Text>
             </>
           ) : (
@@ -722,7 +740,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
                             </View>
                           </View>
 
-                          <Text style={styles.bookingMeta}>Date: {formatDateLabel(booking.booking_date)}</Text>
+                          <Text style={styles.bookingMeta}>Date: {formatDateLabel(booking.booking_date)}{(booking.booking_date_end && booking.booking_date_end !== booking.booking_date) ? ` – ${formatDateLabel(booking.booking_date_end)}` : ''}</Text>
                           <Text style={styles.bookingTime}>{booking.start_time} - {booking.end_time}</Text>
                           <Text style={styles.bookingMeta}>Phone: {booking.phone_number || 'Not provided'}</Text>
                           <Text style={styles.bookingMeta}>Food budget: {formatCurrency(Number(booking.food_budget || 0))}</Text>
@@ -805,7 +823,11 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
               <TextInput placeholder="Mobile / cell phone" value={form.phone_number} onChangeText={(text) => setForm((prev) => ({ ...prev, phone_number: text }))} style={styles.input} keyboardType="phone-pad" />
 
               <Text style={styles.fieldTitle}>Schedule</Text>
-              <TextInput value={form.booking_date} onChangeText={(text) => setForm((prev) => ({ ...prev, booking_date: text }))} style={styles.input} placeholder="YYYY-MM-DD" />
+              <Text style={styles.helperText}>For single-day events, set end date = start date.</Text>
+              <View style={styles.twoCol}>
+                <TextInput value={form.booking_date} onChangeText={(text) => setForm((prev) => ({ ...prev, booking_date: text }))} style={[styles.input, styles.twoColInput]} placeholder="Start YYYY-MM-DD" />
+                <TextInput value={form.booking_date_end} onChangeText={(text) => setForm((prev) => ({ ...prev, booking_date_end: text }))} style={[styles.input, styles.twoColInput]} placeholder="End YYYY-MM-DD" />
+              </View>
               <View style={styles.twoCol}>
                 <TextInput value={form.start_time} onChangeText={(text) => setForm((prev) => ({ ...prev, start_time: text }))} style={[styles.input, styles.twoColInput]} placeholder="09:00" />
                 <TextInput value={form.end_time} onChangeText={(text) => setForm((prev) => ({ ...prev, end_time: text }))} style={[styles.input, styles.twoColInput]} placeholder="11:00" />

@@ -303,6 +303,7 @@ export interface FunctionRoomBooking {
   booker_name: string
   phone_number: string | null
   booking_date: string
+  booking_date_end: string
   start_time: string
   end_time: string
   food_budget: number
@@ -326,6 +327,7 @@ export interface BookingFormInputs {
   booker_name: string
   phone_number: string
   booking_date: string
+  booking_date_end: string
   start_time: string
   end_time: string
   food_budget: string

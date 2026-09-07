@@ -616,6 +616,7 @@ export default function CallFrontDeskModal({
         hotelId={hotelId}
         currentRoomId={roomId}
         roomNumber={roomNumber}
+        hotelPhone={hotelPhone}
       />
     </>
   )

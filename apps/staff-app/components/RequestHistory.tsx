@@ -346,7 +346,7 @@ export default function RequestHistory({ refreshTrigger }: { refreshTrigger?: nu
                     <DetailRow label="Function Rooms" value={roomNames} />
                     <DetailRow label="Booker" value={p?.booker_name || '—'} />
                     <DetailRow label="Phone" value={p?.phone_number || 'Not provided'} />
-                    <DetailRow label="Date" value={p?.booking_date ? new Date(`${p.booking_date}T12:00:00`).toLocaleDateString() : '—'} />
+                    <DetailRow label="Date" value={p?.booking_date ? `${new Date(`${p.booking_date}T12:00:00`).toLocaleDateString()}${p?.booking_date_end && p.booking_date_end !== p.booking_date ? ` – ${new Date(`${p.booking_date_end}T12:00:00`).toLocaleDateString()}` : ''}` : '—'} />
                     <DetailRow label="Time" value={`${p?.start_time || '—'} - ${p?.end_time || '—'}`} />
                     <DetailRow label="Food Budget" value={p?.food_budget ? `₱${Number(p.food_budget).toLocaleString()}` : '₱0'} />
                     <DetailRow label="Banquet Notes" value={p?.banquet_food_notes || 'None'} />

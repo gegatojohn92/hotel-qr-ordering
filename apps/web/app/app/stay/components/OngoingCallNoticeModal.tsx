@@ -12,6 +12,7 @@ interface OngoingCallNoticeModalProps {
   hotelId: string
   currentRoomId: string
   roomNumber: string
+  hotelPhone?: string | null
 }
 
 export default function OngoingCallNoticeModal({
@@ -22,6 +23,7 @@ export default function OngoingCallNoticeModal({
   hotelId,
   currentRoomId,
   roomNumber,
+  hotelPhone,
 }: OngoingCallNoticeModalProps) {
   const theme = useGuestTheme()
   const [queueState, setQueueState] = useState<HotelCallQueueState | null>(null)
@@ -132,7 +134,7 @@ export default function OngoingCallNoticeModal({
             className="text-xs mt-1.5 leading-relaxed"
             style={{ color: 'var(--gw-text-2, #94a3b8)' }}
           >
-            Our front desk is currently speaking with another guest. Please stay on the line — your call will automatically connect as soon as the line is free.
+            Our front desk is currently speaking with another guest. While you wait, you can request a callback or dial us directly — your call will auto-connect as soon as the line is free.
           </p>
         </div>
 
@@ -164,7 +166,7 @@ export default function OngoingCallNoticeModal({
         </div>
 
         <div className="space-y-2 pt-1">
-          {/* Option A: Request Phone Callback instead */}
+          {/* Option A: Request Staff Callback */}
           <button
             type="button"
             onClick={onRequestCallback}
@@ -173,11 +175,27 @@ export default function OngoingCallNoticeModal({
               background: `linear-gradient(135deg, ${theme.primaryHex || '#6366f1'}, ${theme.secondaryHex || '#8b5cf6'})`,
             }}
           >
-            <span>📱</span>
-            <span>Request Phone Callback Instead</span>
+            <span>🛎️</span>
+            <span>Request Staff Callback</span>
           </button>
 
-          {/* Option B: Cancel */}
+          {/* Option B: Call Front Desk Directly (only shown if hotelPhone is available) */}
+          {hotelPhone && (
+            <a
+              href={`tel:${hotelPhone}`}
+              className="w-full py-3 px-4 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
+              style={{
+                background: 'rgba(251, 191, 36, 0.12)',
+                border: '1px solid rgba(251, 191, 36, 0.35)',
+                color: '#fbbf24',
+              }}
+            >
+              <span>📞</span>
+              <span>Call Front Desk Directly</span>
+            </a>
+          )}
+
+          {/* Option C: Cancel & Return */}
           <button
             type="button"
             onClick={onClose}
