@@ -44,6 +44,7 @@ Examples:
 | 2026-09-04 | [2026-09-04_guest-qr-resilience-fix.md](./2026-09-04_guest-qr-resilience-fix.md) | Fixed "Invalid QR Code" crash on guest web: split theme fetch from room validation so missing migration 24 columns don't break QR access |
 | 2026-09-04 | [2026-09-04_supabase-account-migration-guide.md](./2026-09-04_supabase-account-migration-guide.md) | **PENDING** — Step-by-step guide for migrating to a new Supabase account (egress limits reached). Includes data export, new project setup, code updates, and verification steps. |
 | 2026-09-08 | [2026-09-08_fix-agora-reconnect-joinchannel-code-17.md](./2026-09-08_fix-agora-reconnect-joinchannel-code-17.md) | Fixed Agora live call reconnect error `-17` (`ERR_JOIN_CHANNEL_REJECTED`) on staff-app: centralized native/web engine teardown on `onUserOffline`, `onError`, and pre-join. |
+| 2026-09-08 | [2026-09-08_function-room-status-actions-cancel-modal.md](./2026-09-08_function-room-status-actions-cancel-modal.md) | Fixed function room status buttons, excluded completed items from upcoming list, added Active/Completed/All filter tabs, and added Cancel Reason text input modal. |
 
 ---
 

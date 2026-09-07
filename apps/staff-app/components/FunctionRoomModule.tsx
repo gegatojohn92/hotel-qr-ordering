@@ -125,6 +125,15 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
   const [form, setForm] = useState<BookingFormState>(DEFAULT_FORM)
   const [error, setError] = useState('')
 
+  // Filter tabs: ACTIVE, COMPLETED, ALL
+  const [viewFilter, setViewFilter] = useState<'ACTIVE' | 'COMPLETED' | 'ALL'>('ACTIVE')
+
+  // Cancellation modal state
+  const [cancelModalVisible, setCancelModalVisible] = useState(false)
+  const [cancellingBooking, setCancellingBooking] = useState<FunctionRoomBooking | null>(null)
+  const [cancellationReason, setCancellationReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+
   const equipmentMap = useMemo(() => {
     return new Map(equipment.map((item) => [item.id, item]))
   }, [equipment])
@@ -145,15 +154,42 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
     return parseNumber(form.food_budget) + equipmentTotal
   }, [equipmentTotal, form.food_budget])
 
-  const upcomingBookings = useMemo(() => {
+  // Active upcoming bookings (PENDING & CONFIRMED only — COMPLETED and CANCELLED are excluded)
+  const activeBookings = useMemo(() => {
     return [...bookings]
-      .filter((booking) => !['CANCELLED'].includes(booking.status))
+      .filter((booking) => ['PENDING', 'CONFIRMED'].includes(booking.status))
       .sort((a, b) => {
         const aDate = new Date(`${a.booking_date}T${a.start_time}`).getTime()
         const bDate = new Date(`${b.booking_date}T${b.start_time}`).getTime()
         return aDate - bDate
       })
   }, [bookings])
+
+  // Completed bookings
+  const completedBookings = useMemo(() => {
+    return [...bookings]
+      .filter((booking) => booking.status === 'COMPLETED')
+      .sort((a, b) => {
+        const aDate = new Date(`${a.booking_date}T${a.start_time}`).getTime()
+        const bDate = new Date(`${b.booking_date}T${b.start_time}`).getTime()
+        return bDate - aDate
+      })
+  }, [bookings])
+
+  // Bookings currently displayed based on active tab
+  const displayedBookings = useMemo(() => {
+    if (viewFilter === 'COMPLETED') return completedBookings
+    if (viewFilter === 'ALL') {
+      return [...bookings].sort((a, b) => {
+        const aDate = new Date(`${a.booking_date}T${a.start_time}`).getTime()
+        const bDate = new Date(`${b.booking_date}T${b.start_time}`).getTime()
+        return aDate - bDate
+      })
+    }
+    return activeBookings
+  }, [viewFilter, activeBookings, completedBookings, bookings])
+
+  const upcomingBookings = activeBookings
 
   const loadData = async () => {
     setLoading(true)
@@ -542,6 +578,18 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
         : normalizedCancellationReason ? `Cancelled: ${normalizedCancellationReason}` : booking?.notes || 'Cancelled')
       : booking?.notes || null
 
+    // 1. Instant optimistic local state update
+    setBookings((prev) =>
+      prev.map((item) => {
+        if (item.id !== bookingId) return item
+        return {
+          ...item,
+          status,
+          notes: nextNotes,
+        }
+      })
+    )
+
     try {
       const { error } = await supabase
         .from('function_room_bookings')
@@ -610,7 +658,32 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
       await loadData()
       Alert.alert('Booking updated', status === 'CANCELLED' ? `Booking cancelled${normalizedCancellationReason ? `: ${normalizedCancellationReason}` : ''}.` : `Booking marked as ${status}.`)
     } catch (err: any) {
+      // Revert/refresh on error
+      await loadData()
       Alert.alert('Update failed', err?.message || 'Unable to update the booking status.')
+    }
+  }
+
+  const openCancelModal = (booking: FunctionRoomBooking) => {
+    setCancellingBooking(booking)
+    setCancellationReason('')
+    setCancelModalVisible(true)
+  }
+
+  const closeCancelModal = () => {
+    setCancelModalVisible(false)
+    setCancellingBooking(null)
+    setCancellationReason('')
+  }
+
+  const handleConfirmCancel = async () => {
+    if (!cancellingBooking) return
+    setCancelling(true)
+    try {
+      await updateBookingStatus(cancellingBooking.id, 'CANCELLED', cancellationReason)
+      closeCancelModal()
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -676,8 +749,34 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
       ) : (
         <>
           <View style={styles.toolbar}>
-            <Text style={styles.label}>Upcoming bookings</Text>
-            <Text style={styles.toolbarValue}>{upcomingBookings.length} active</Text>
+            <View style={styles.tabGroup}>
+              <TouchableOpacity
+                style={[styles.tabButton, viewFilter === 'ACTIVE' && styles.tabButtonActive]}
+                onPress={() => setViewFilter('ACTIVE')}
+              >
+                <Text style={[styles.tabButtonText, viewFilter === 'ACTIVE' && styles.tabButtonTextActive]}>
+                  Active ({activeBookings.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, viewFilter === 'COMPLETED' && styles.tabButtonActive]}
+                onPress={() => setViewFilter('COMPLETED')}
+              >
+                <Text style={[styles.tabButtonText, viewFilter === 'COMPLETED' && styles.tabButtonTextActive]}>
+                  Completed ({completedBookings.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, viewFilter === 'ALL' && styles.tabButtonActive]}
+                onPress={() => setViewFilter('ALL')}
+              >
+                <Text style={[styles.tabButtonText, viewFilter === 'ALL' && styles.tabButtonTextActive]}>
+                  All ({bookings.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {loading ? (
@@ -689,7 +788,7 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
             <>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roomChipsWrap}>
                 {rooms.map((room) => {
-                  const roomCount = upcomingBookings.filter((b) => {
+                  const roomCount = activeBookings.filter((b) => {
                     const roomIds = b.function_room_ids && b.function_room_ids.length > 0 ? b.function_room_ids : [b.function_room_id]
                     return roomIds.includes(room.id)
                   }).length
@@ -711,22 +810,26 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
                       })}
                     >
                       <Text style={[styles.roomChipText, form.selectedRoomIds.includes(room.id) && styles.roomChipTextActive]}>{room.name}</Text>
-                      <Text style={styles.roomChipMeta}>{roomCount} booked</Text>
+                      <Text style={styles.roomChipMeta}>{roomCount} active</Text>
                     </TouchableOpacity>
                   )
                 })}
               </ScrollView>
 
               <View style={styles.bookingList}>
-                {upcomingBookings.length === 0 ? (
+                {displayedBookings.length === 0 ? (
                   <View style={styles.emptyCard}>
                     <Text style={styles.emptyIcon}>🗓️</Text>
-                    <Text style={styles.emptyTitle}>No upcoming bookings</Text>
-                    <Text style={styles.emptyBody}>Create a new function room booking to schedule an event.</Text>
+                    <Text style={styles.emptyTitle}>
+                      {viewFilter === 'COMPLETED' ? 'No completed bookings' : viewFilter === 'ALL' ? 'No bookings found' : 'No upcoming active bookings'}
+                    </Text>
+                    <Text style={styles.emptyBody}>
+                      {viewFilter === 'ACTIVE' ? 'Create a new function room booking to schedule an event.' : 'Bookings will appear here once scheduled.'}
+                    </Text>
                   </View>
                 ) : (
-                  upcomingBookings.map((booking) => {
-                    const selectedEquipmentTotal = booking.rented_equipments.reduce((sum, item) => sum + Number(item.rental_price || 0), 0)
+                  displayedBookings.map((booking) => {
+                    const selectedEquipmentTotal = (booking.rented_equipments || []).reduce((sum, item) => sum + Number(item.rental_price || 0), 0)
                     return (
                       <TouchableOpacity key={booking.id} onPress={() => openEditModal(booking)} activeOpacity={0.8}>
                         <View style={styles.bookingCard}>
@@ -735,8 +838,22 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
                               <Text style={styles.bookingName}>{booking.booker_name}</Text>
                               <Text style={styles.bookingMeta}>{booking.room_names || roomNameSummary(booking.function_room_ids && booking.function_room_ids.length > 0 ? booking.function_room_ids : [booking.function_room_id])}</Text>
                             </View>
-                            <View style={[styles.statusPill, booking.status === 'CANCELLED' ? styles.statusCancelled : styles.statusDefault]}>
-                              <Text style={styles.statusText}>{booking.status}</Text>
+                            <View style={[
+                              styles.statusPill,
+                              booking.status === 'CONFIRMED' ? styles.statusConfirmed :
+                              booking.status === 'COMPLETED' ? styles.statusCompleted :
+                              booking.status === 'CANCELLED' ? styles.statusCancelled :
+                              styles.statusPending
+                            ]}>
+                              <Text style={[
+                                styles.statusText,
+                                booking.status === 'CONFIRMED' ? styles.statusTextConfirmed :
+                                booking.status === 'COMPLETED' ? styles.statusTextCompleted :
+                                booking.status === 'CANCELLED' ? styles.statusTextCancelled :
+                                styles.statusTextPending
+                              ]}>
+                                {booking.status}
+                              </Text>
                             </View>
                           </View>
 
@@ -751,19 +868,44 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
                             <Text style={styles.bookingMeta}>Menu notes: {booking.banquet_food_notes}</Text>
                           ) : null}
 
+                          {booking.notes ? (
+                            <Text style={styles.bookingMeta}>Notes: {booking.notes}</Text>
+                          ) : null}
+
                           <View style={styles.bookingActions}>
-                            <TouchableOpacity style={styles.callButton} onPress={() => callBooker(booking.phone_number)}>
-                              <Text style={styles.callButtonText}>📞 Call</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.smallActionButton} onPress={() => updateBookingStatus(booking.id, 'CONFIRMED')}>
-                              <Text style={styles.smallActionText}>Confirm</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.smallActionButtonSecondary} onPress={() => updateBookingStatus(booking.id, 'COMPLETED')}>
-                              <Text style={styles.smallActionTextSecondary}>Complete</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.smallActionButtonDanger} onPress={() => updateBookingStatus(booking.id, 'CANCELLED')}>
-                              <Text style={styles.smallActionTextDanger}>Cancel</Text>
-                            </TouchableOpacity>
+                            {booking.phone_number ? (
+                              <TouchableOpacity style={styles.callButton} onPress={() => callBooker(booking.phone_number)}>
+                                <Text style={styles.callButtonText}>📞 Call</Text>
+                              </TouchableOpacity>
+                            ) : null}
+
+                            {/* Status-aware action buttons */}
+                            {booking.status === 'PENDING' && (
+                              <TouchableOpacity
+                                style={styles.smallActionButton}
+                                onPress={() => updateBookingStatus(booking.id, 'CONFIRMED')}
+                              >
+                                <Text style={styles.smallActionText}>✓ Confirm</Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {booking.status === 'CONFIRMED' && (
+                              <TouchableOpacity
+                                style={styles.smallActionButtonSecondary}
+                                onPress={() => updateBookingStatus(booking.id, 'COMPLETED')}
+                              >
+                                <Text style={styles.smallActionTextSecondary}>✓ Complete</Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {['PENDING', 'CONFIRMED'].includes(booking.status) && (
+                              <TouchableOpacity
+                                style={styles.smallActionButtonDanger}
+                                onPress={() => openCancelModal(booking)}
+                              >
+                                <Text style={styles.smallActionTextDanger}>✕ Cancel</Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                           <Text style={styles.editHint}>Tap to edit details</Text>
                         </View>
@@ -903,6 +1045,88 @@ export default function FunctionRoomModule({ activeStaffUser }: { activeStaffUse
           </View>
         </View>
       </Modal>
+
+      {/* 🛑 Cancellation Reason Modal */}
+      <Modal visible={cancelModalVisible} animationType="fade" transparent>
+        <View style={styles.modalBacking}>
+          <View style={[styles.modalCard, styles.cancelModalCard]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.cancelTitleRow}>
+                <Text style={styles.cancelModalIcon}>⚠️</Text>
+                <Text style={styles.cancelModalTitle}>Cancel Function Booking</Text>
+              </View>
+              <TouchableOpacity onPress={closeCancelModal} disabled={cancelling}>
+                <Text style={styles.closeText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {cancellingBooking && (
+              <View style={styles.cancelBookingSummary}>
+                <Text style={styles.cancelBookerName}>{cancellingBooking.booker_name}</Text>
+                <Text style={styles.cancelBookingMeta}>
+                  {cancellingBooking.room_names || roomNameSummary(cancellingBooking.function_room_ids && cancellingBooking.function_room_ids.length > 0 ? cancellingBooking.function_room_ids : [cancellingBooking.function_room_id])}
+                </Text>
+                <Text style={styles.cancelBookingMeta}>
+                  {formatDateLabel(cancellingBooking.booking_date)} • {cancellingBooking.start_time} - {cancellingBooking.end_time}
+                </Text>
+              </View>
+            )}
+
+            <Text style={styles.fieldTitle}>Reason for Cancellation</Text>
+            <Text style={styles.helperText}>Provide a reason for the audit trail and records.</Text>
+
+            {/* Quick preset reason chips */}
+            <View style={styles.presetChipsRow}>
+              {[
+                'Client Request',
+                'Schedule Conflict',
+                'Non-Payment / Overdue',
+                'Emergency / Weather',
+                'Duplicate Booking',
+              ].map((preset) => (
+                <TouchableOpacity
+                  key={preset}
+                  style={[styles.presetChip, cancellationReason === preset && styles.presetChipActive]}
+                  onPress={() => setCancellationReason(preset)}
+                >
+                  <Text style={[styles.presetChipText, cancellationReason === preset && styles.presetChipTextActive]}>
+                    {preset}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              value={cancellationReason}
+              onChangeText={setCancellationReason}
+              style={[styles.input, styles.cancelTextArea]}
+              multiline
+              placeholder="Type cancellation reason here..."
+              placeholderTextColor="#64748b"
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={closeCancelModal}
+                disabled={cancelling}
+              >
+                <Text style={styles.secondaryButtonText}>Keep Booking</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.dangerButton, cancelling && styles.buttonDisabled]}
+                onPress={handleConfirmCancel}
+                disabled={cancelling}
+              >
+                <Text style={styles.dangerButtonText}>
+                  {cancelling ? 'Cancelling…' : 'Confirm Cancellation'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   )
 }
@@ -998,64 +1222,82 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: 10,
     padding: 10,
-    marginTop: 10,
+    marginTop: 8,
+    gap: 4,
   },
   detailTitleText: {
     color: '#fbbf24',
     fontWeight: '800',
     fontSize: 12,
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginBottom: 4,
   },
   detailRowText: {
-    color: '#e2e8f0',
+    color: '#cbd5e1',
     fontSize: 11,
-    marginTop: 4,
   },
   toolbar: {
-    marginBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 12,
+  },
+  tabGroup: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    padding: 3,
+    gap: 4,
+  },
+  tabButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: '#fbbf24',
+  },
+  tabButtonText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  tabButtonTextActive: {
+    color: '#0f172a',
+    fontWeight: '800',
   },
   label: {
     color: '#cbd5e1',
-    fontSize: 11,
     fontWeight: '700',
-    marginBottom: 0,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 12,
   },
   toolbarValue: {
     color: '#fbbf24',
-    fontSize: 11,
     fontWeight: '800',
+    fontSize: 12,
   },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 10,
-    backgroundColor: '#020617',
-    color: '#f8fafc',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  loadingWrap: {
+    padding: 24,
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingText: {
+    color: '#94a3b8',
+    fontSize: 12,
   },
   roomChipsWrap: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   roomChip: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     marginRight: 8,
   },
   roomChipActive: {
-    backgroundColor: 'rgba(251,191,36,0.14)',
+    backgroundColor: 'rgba(251,191,36,0.12)',
     borderColor: 'rgba(251,191,36,0.4)',
   },
   roomChipText: {
@@ -1067,39 +1309,28 @@ const styles = StyleSheet.create({
     color: '#fbbf24',
   },
   roomChipMeta: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: 10,
     marginTop: 2,
-  },
-  loadingWrap: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  loadingText: {
-    color: '#94a3b8',
-    fontSize: 12,
   },
   bookingList: {
     gap: 10,
   },
   emptyCard: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 12,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   emptyIcon: {
-    fontSize: 26,
-    marginBottom: 8,
+    fontSize: 28,
+    marginBottom: 6,
   },
   emptyTitle: {
     color: '#f8fafc',
-    fontWeight: '700',
+    fontWeight: '800',
     fontSize: 14,
     marginBottom: 4,
   },
@@ -1150,16 +1381,42 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(59,130,246,0.3)',
   },
+  statusPending: {
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.3)',
+  },
+  statusConfirmed: {
+    backgroundColor: 'rgba(34,197,94,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.35)',
+  },
+  statusCompleted: {
+    backgroundColor: 'rgba(56,189,248,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.3)',
+  },
   statusCancelled: {
     backgroundColor: 'rgba(239,68,68,0.12)',
     borderWidth: 1,
     borderColor: 'rgba(239,68,68,0.25)',
   },
   statusText: {
-    color: '#f8fafc',
     fontWeight: '700',
     fontSize: 10,
     textTransform: 'uppercase',
+  },
+  statusTextPending: {
+    color: '#fbbf24',
+  },
+  statusTextConfirmed: {
+    color: '#4ade80',
+  },
+  statusTextCompleted: {
+    color: '#38bdf8',
+  },
+  statusTextCancelled: {
+    color: '#fca5a5',
   },
   bookingActions: {
     marginTop: 10,
@@ -1242,6 +1499,86 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+  },
+  cancelModalCard: {
+    maxHeight: '80%',
+    borderColor: 'rgba(239,68,68,0.25)',
+  },
+  cancelTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cancelModalIcon: {
+    fontSize: 18,
+  },
+  cancelModalTitle: {
+    color: '#f8fafc',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  cancelBookingSummary: {
+    backgroundColor: 'rgba(2,6,23,0.6)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 10,
+    marginBottom: 8,
+  },
+  cancelBookerName: {
+    color: '#f8fafc',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  cancelBookingMeta: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  presetChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  presetChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  presetChipActive: {
+    backgroundColor: 'rgba(239,68,68,0.14)',
+    borderColor: 'rgba(239,68,68,0.4)',
+  },
+  presetChipText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  presetChipTextActive: {
+    color: '#fca5a5',
+  },
+  cancelTextArea: {
+    minHeight: 70,
+    textAlignVertical: 'top',
+  },
+  dangerButton: {
+    flex: 1,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  dangerButtonText: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   modalHeader: {
     flexDirection: 'row',
