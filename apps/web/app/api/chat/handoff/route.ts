@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendWebPushToHotelStaff } from '@/lib/webPush'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const DEFAULT_SUPABASE_URL = 'https://bsjnlawhdgfilcfejbji.supabase.co'
+const DEFAULT_SUPABASE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzam5sYXdoZGdmaWxjZmVqYmppIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjI2OTEzOSwiZXhwIjoyMTAxODQ1MTM5fQ.JDtcNvuonuK_6sSL4evhWjoXdqUatQy4Oii4rBTMZF8'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  DEFAULT_SUPABASE_KEY
 
 /**
  * POST /api/chat/handoff
@@ -60,16 +67,24 @@ export async function POST(req: NextRequest) {
       .eq('id', room_id)
       .maybeSingle()
 
-    const { data: convData } = await supabase
-      .from('guest_conversations')
-      .select('guest_phone')
-      .eq('id', conversation_id)
-      .maybeSingle()
+    let guestPhone: string | null = null
+    try {
+      const { data: convData } = await supabase
+        .from('guest_conversations')
+        .select('guest_phone')
+        .eq('id', conversation_id)
+        .maybeSingle()
+      if (convData?.guest_phone) {
+        guestPhone = convData.guest_phone
+      }
+    } catch {
+      // column may not exist yet
+    }
 
-    const phoneSuffix = convData?.guest_phone ? ` · 📞 ${convData.guest_phone}` : ''
+    const phoneSuffix = guestPhone ? ` · 📞 ${guestPhone}` : ''
     const pushBody = guest_message
-      ? `"${String(guest_message).slice(0, 80)}"${convData?.guest_phone ? ` (Phone: ${convData.guest_phone})` : ''}`
-      : `A guest in Room ${roomData?.room_number || '?'} needs your assistance.${convData?.guest_phone ? ` (Phone: ${convData.guest_phone})` : ''}`
+      ? `"${String(guest_message).slice(0, 80)}"${guestPhone ? ` (Phone: ${guestPhone})` : ''}`
+      : `A guest in Room ${roomData?.room_number || '?'} needs your assistance.${guestPhone ? ` (Phone: ${guestPhone})` : ''}`
 
     await sendWebPushToHotelStaff(hotel_id, {
       title: `🙋 Guest Handoff – Room ${roomData?.room_number || '?'}${phoneSuffix}`,

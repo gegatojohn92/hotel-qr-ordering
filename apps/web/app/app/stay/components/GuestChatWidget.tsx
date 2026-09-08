@@ -196,22 +196,50 @@ export default function GuestChatWidget() {
     if (!effectiveRoomId || !hotelIdResolved) return
 
     const activeSessionId = getStoredGuestSessionId(effectiveRoomId)
+    let conv: any = null
 
-    // Scope query by session_id if available to prevent history leaks between guests
-    let query = (supabase as any)
-      .from('guest_conversations')
-      .select('*')
-      .eq('room_id', effectiveRoomId)
-      .eq('hotel_id', hotelIdResolved)
-      .neq('status', 'RESOLVED')
-      .order('created_at', { ascending: false })
-      .limit(1)
-
+    // 1. If activeSessionId is present, try loading conversation scoped to this session
     if (activeSessionId) {
-      query = query.eq('session_id', activeSessionId)
+      try {
+        const { data: scopedConv, error: scopedErr } = await (supabase as any)
+          .from('guest_conversations')
+          .select('*')
+          .eq('room_id', effectiveRoomId)
+          .eq('hotel_id', hotelIdResolved)
+          .eq('session_id', activeSessionId)
+          .neq('status', 'RESOLVED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (!scopedErr && scopedConv) {
+          conv = scopedConv
+        }
+      } catch {
+        // session_id column might not exist or query failed
+      }
     }
 
-    const { data: conv } = await query.maybeSingle()
+    // 2. If no scoped conversation found, fall back to room-level active conversation
+    if (!conv) {
+      try {
+        const { data: roomConv } = await (supabase as any)
+          .from('guest_conversations')
+          .select('*')
+          .eq('room_id', effectiveRoomId)
+          .eq('hotel_id', hotelIdResolved)
+          .neq('status', 'RESOLVED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (roomConv) {
+          conv = roomConv
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (conv) {
       setConversation(conv)

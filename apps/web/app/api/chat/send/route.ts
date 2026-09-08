@@ -3,8 +3,15 @@ import { createClient } from '@supabase/supabase-js'
 import { generateAiResponse, type AiChatMessage } from '@/lib/ai-assistant'
 import { sendWebPushToHotelStaff } from '@/lib/webPush'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const DEFAULT_SUPABASE_URL = 'https://bsjnlawhdgfilcfejbji.supabase.co'
+const DEFAULT_SUPABASE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzam5sYXdoZGdmaWxjZmVqYmppIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjI2OTEzOSwiZXhwIjoyMTAxODQ1MTM5fQ.JDtcNvuonuK_6sSL4evhWjoXdqUatQy4Oii4rBTMZF8'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  DEFAULT_SUPABASE_KEY
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,79 +28,153 @@ export async function POST(req: NextRequest) {
     let convId = conversation_id as string | null
 
     if (!convId) {
-      // Try to find an existing non-resolved conversation for this room and session
-      let query = supabase
-        .from('guest_conversations')
-        .select('id, status, guest_phone')
-        .eq('hotel_id', hotel_id)
-        .eq('room_id', room_id)
-        .neq('status', 'RESOLVED')
-        .order('created_at', { ascending: false })
-        .limit(1)
-
+      // 1a. Try to find active conversation scoped to session_id if provided
       if (session_id) {
-        query = query.eq('session_id', session_id)
-      }
-
-      const { data: existing } = await query.maybeSingle()
-
-      if (existing) {
-        convId = existing.id
-      } else {
-        // Resolve effective guest phone if not passed directly
-        let effectivePhone = guest_phone ? String(guest_phone).trim() : null
-        if (!effectivePhone) {
-          let sessQuery = supabase
-            .from('guest_sessions')
-            .select('phone_number')
+        try {
+          const { data: scopedConv } = await supabase
+            .from('guest_conversations')
+            .select('id, status')
+            .eq('hotel_id', hotel_id)
+            .eq('room_id', room_id)
+            .eq('session_id', session_id)
+            .neq('status', 'RESOLVED')
             .order('created_at', { ascending: false })
             .limit(1)
+            .maybeSingle()
 
-          if (session_id) {
-            sessQuery = sessQuery.eq('id', session_id)
-          } else {
-            sessQuery = sessQuery.eq('room_id', room_id)
+          if (scopedConv?.id) {
+            convId = scopedConv.id
           }
+        } catch {
+          // session_id column might not exist or failed
+        }
+      }
 
-          const { data: sessData } = await sessQuery.maybeSingle()
-          if (sessData?.phone_number) {
-            effectivePhone = sessData.phone_number
+      // 1b. Fallback: find any active conversation for this room
+      if (!convId) {
+        const { data: existing } = await supabase
+          .from('guest_conversations')
+          .select('id, status')
+          .eq('hotel_id', hotel_id)
+          .eq('room_id', room_id)
+          .neq('status', 'RESOLVED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (existing?.id) {
+          convId = existing.id
+        }
+      }
+
+      // 1c. Create new conversation if none exists
+      if (!convId) {
+        let effectivePhone = guest_phone ? String(guest_phone).trim() : null
+        if (!effectivePhone) {
+          try {
+            let sessQuery = supabase
+              .from('guest_sessions')
+              .select('phone_number')
+              .order('created_at', { ascending: false })
+              .limit(1)
+
+            if (session_id) {
+              sessQuery = sessQuery.eq('id', session_id)
+            } else {
+              sessQuery = sessQuery.eq('room_id', room_id)
+            }
+
+            const { data: sessData } = await sessQuery.maybeSingle()
+            if (sessData?.phone_number) {
+              effectivePhone = sessData.phone_number
+            }
+          } catch {
+            // ignore session phone query error
           }
         }
 
-        // Create new conversation
-        const { data: newConv, error: convErr } = await supabase
-          .from('guest_conversations')
-          .insert({
+        let createdConv: { id: string; status: string } | null = null
+
+        // Attempt rich insert with session_id and guest_phone
+        if (session_id || effectivePhone) {
+          const richPayload: Record<string, any> = {
             hotel_id,
             room_id,
-            session_id: session_id || null,
-            guest_phone: effectivePhone || null,
             status: 'BOT_ACTIVE',
             guest_name: guest_name || sender_name || 'Guest',
             last_message_text: message_text,
             last_message_sender: 'GUEST',
             last_message_at: new Date().toISOString(),
-          })
-          .select('id, status')
-          .single()
+          }
+          if (session_id) richPayload.session_id = session_id
+          if (effectivePhone) richPayload.guest_phone = effectivePhone
 
-        if (convErr || !newConv) {
-          return NextResponse.json({ error: convErr?.message || 'Failed to create conversation' }, { status: 500 })
+          const { data: richConv, error: richErr } = await supabase
+            .from('guest_conversations')
+            .insert(richPayload)
+            .select('id, status')
+            .single()
+
+          if (!richErr && richConv) {
+            createdConv = richConv
+          } else {
+            console.warn('[Chat Send] Rich insert notice:', richErr?.message)
+          }
         }
-        convId = newConv.id
+
+        // Resilient fallback: baseline insert without session/phone columns
+        if (!createdConv) {
+          const { data: baseConv, error: baseErr } = await supabase
+            .from('guest_conversations')
+            .insert({
+              hotel_id,
+              room_id,
+              status: 'BOT_ACTIVE',
+              guest_name: guest_name || sender_name || 'Guest',
+              last_message_text: message_text,
+              last_message_sender: 'GUEST',
+              last_message_at: new Date().toISOString(),
+            })
+            .select('id, status')
+            .single()
+
+          if (baseErr || !baseConv) {
+            return NextResponse.json(
+              { error: baseErr?.message || 'Failed to create conversation' },
+              { status: 500 }
+            )
+          }
+          createdConv = baseConv
+        }
+
+        convId = createdConv.id
       }
     }
 
     // ── 2. Fetch current conversation state ────────────────────────────────
     const { data: conv } = await supabase
       .from('guest_conversations')
-      .select('id, status, unread_staff_count, guest_phone')
+      .select('id, status, unread_staff_count')
       .eq('id', convId)
       .single()
 
     if (!conv) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+    }
+
+    // Safely check for phone on conversation
+    let conversationPhone: string | null = guest_phone || null
+    try {
+      const { data: phoneRow } = await supabase
+        .from('guest_conversations')
+        .select('guest_phone')
+        .eq('id', convId)
+        .maybeSingle()
+      if (phoneRow && 'guest_phone' in phoneRow && phoneRow.guest_phone) {
+        conversationPhone = phoneRow.guest_phone
+      }
+    } catch {
+      // Column may not exist yet
     }
 
     // ── 3. Insert guest message ─────────────────────────────────────────────
@@ -117,26 +198,39 @@ export async function POST(req: NextRequest) {
 
     // ── 4. Update conversation last message ────────────────────────────────
     const newUnreadStaff = (conv.unread_staff_count || 0) + 1
-    const convUpdatePayload: Record<string, any> = {
+    const baselineUpdate: Record<string, any> = {
       last_message_text: message_text.trim(),
       last_message_sender: 'GUEST',
       last_message_at: new Date().toISOString(),
       unread_staff_count: newUnreadStaff,
       updated_at: new Date().toISOString(),
     }
-    if (guest_phone?.trim() && !conv.guest_phone) {
-      convUpdatePayload.guest_phone = guest_phone.trim()
-    }
-    if (session_id) {
-      convUpdatePayload.session_id = session_id
+
+    if (guest_phone?.trim() || session_id) {
+      const richUpdate = { ...baselineUpdate }
+      if (guest_phone?.trim()) richUpdate.guest_phone = guest_phone.trim()
+      if (session_id) richUpdate.session_id = session_id
+
+      const { error: richErr } = await supabase
+        .from('guest_conversations')
+        .update(richUpdate)
+        .eq('id', convId)
+
+      if (richErr) {
+        // Fall back to baseline update if extra columns don't exist
+        await supabase
+          .from('guest_conversations')
+          .update(baselineUpdate)
+          .eq('id', convId)
+      }
+    } else {
+      await supabase
+        .from('guest_conversations')
+        .update(baselineUpdate)
+        .eq('id', convId)
     }
 
-    await supabase
-      .from('guest_conversations')
-      .update(convUpdatePayload)
-      .eq('id', convId)
-
-    const effectivePhoneForPush = convUpdatePayload.guest_phone || conv.guest_phone
+    const effectivePhoneForPush = conversationPhone || guest_phone || null
 
     // ── 5. AI Auto-Reply (if BOT_ACTIVE) ───────────────────────────────────
     let aiMessage: { id: string; message_text: string; created_at: string } | null = null
