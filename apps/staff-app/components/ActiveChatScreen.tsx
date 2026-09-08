@@ -61,6 +61,40 @@ function formatTime(iso: string): string {
   }
 }
 
+function formatAuditDateTime(iso?: string | null): string {
+  if (!iso) return 'N/A'
+  try {
+    const d = new Date(iso)
+    const datePart = d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+    const timePart = d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    return `${datePart} · ${timePart}`
+  } catch {
+    return iso || ''
+  }
+}
+
+function formatMessageTimestamp(iso: string, isResolved?: boolean): string {
+  try {
+    const d = new Date(iso)
+    const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    if (isResolved) {
+      const datePart = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      return `${datePart}, ${timePart}`
+    }
+    return timePart
+  } catch {
+    return ''
+  }
+}
+
 function getBubbleStyle(senderType: GuestChatSenderType, isOwnMsg: boolean) {
   if (isOwnMsg) {
     return {
@@ -475,6 +509,29 @@ export default function ActiveChatScreen({
         )}
       </View>
 
+      {/* Audit Banner for Resolved Conversations */}
+      {currentConv.status === 'RESOLVED' && (
+        <View style={chatStyles.auditBanner}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 13 }}>📋</Text>
+              <Text style={chatStyles.auditBannerTitle}>AUDIT LOG · RESOLVED</Text>
+            </View>
+            <View style={chatStyles.auditStatusTag}>
+              <Text style={chatStyles.auditStatusTagText}>CLOSED</Text>
+            </View>
+          </View>
+          <Text style={chatStyles.auditBannerDateText}>
+            🗓️ Date Resolved: <Text style={{ color: '#4ade80', fontWeight: '700' }}>{formatAuditDateTime(currentConv.updated_at || currentConv.last_message_at)}</Text>
+          </Text>
+          {currentConv.created_at ? (
+            <Text style={chatStyles.auditBannerStartedText}>
+              Started: {formatAuditDateTime(currentConv.created_at)}
+            </Text>
+          ) : null}
+        </View>
+      )}
+
       {/* Messages */}
       <ScrollView
         ref={scrollRef}
@@ -502,7 +559,9 @@ export default function ActiveChatScreen({
                   {msg.message_text}
                 </Text>
               </View>
-              <Text style={chatStyles.timestamp}>{formatTime(msg.created_at)}</Text>
+              <Text style={chatStyles.timestamp}>
+                {formatMessageTimestamp(msg.created_at, currentConv.status === 'RESOLVED')}
+              </Text>
             </View>
           )
         })}
@@ -670,5 +729,43 @@ const chatStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#34d399',
+  },
+  auditBanner: {
+    backgroundColor: 'rgba(74, 222, 128, 0.08)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(74, 222, 128, 0.25)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  auditBannerTitle: {
+    color: '#4ade80',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  auditStatusTag: {
+    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.4)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  auditStatusTagText: {
+    color: '#4ade80',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  auditBannerDateText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  auditBannerStartedText: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '400',
+    marginTop: 2,
   },
 })

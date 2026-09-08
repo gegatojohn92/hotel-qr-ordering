@@ -30,6 +30,26 @@ function timeAgo(iso: string): string {
   }
 }
 
+function formatAuditDate(iso?: string | null): string {
+  if (!iso) return 'N/A'
+  try {
+    const d = new Date(iso)
+    const datePart = d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+    const timePart = d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    return `${datePart} · ${timePart}`
+  } catch {
+    return iso || ''
+  }
+}
+
 // ─── GuestChatModule ──────────────────────────────────────────────────────────
 
 interface GuestChatModuleProps {
@@ -237,7 +257,9 @@ export default function GuestChatModule({
                         </TouchableOpacity>
                       ) : null}
                     </View>
-                    <Text style={styles.convTime}>{timeAgo(conv.last_message_at)}</Text>
+                    <Text style={[styles.convTime, activeTab === 'RESOLVED' && styles.convTimeResolved]}>
+                      {timeAgo(conv.updated_at || conv.last_message_at)}
+                    </Text>
                   </View>
                   <Text style={styles.convSnippet} numberOfLines={1}>
                     {conv.last_message_sender === 'AI'
@@ -247,6 +269,20 @@ export default function GuestChatModule({
                       : '👤 '}
                     {conv.last_message_text || 'No messages yet'}
                   </Text>
+                  {activeTab === 'RESOLVED' && (
+                    <View style={styles.auditRow}>
+                      <View style={styles.auditDateBadge}>
+                        <Text style={styles.auditDateBadgeText}>
+                          🗓️ Resolved: {formatAuditDate(conv.updated_at || conv.last_message_at)}
+                        </Text>
+                      </View>
+                      {conv.created_at ? (
+                        <Text style={styles.auditStartedText}>
+                          Started: {formatAuditDate(conv.created_at)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
                 </View>
 
                 {(conv.unread_staff_count || 0) > 0 && (
@@ -379,5 +415,40 @@ const styles = StyleSheet.create({
     color: '#34d399',
     fontSize: 11,
     fontWeight: '700',
+  },
+  convTimeResolved: {
+    color: '#4ade80',
+    fontWeight: '600',
+  },
+  auditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  auditDateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.3)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  auditDateBadgeText: {
+    color: '#4ade80',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  auditStartedText: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '500',
   },
 })
