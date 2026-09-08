@@ -313,6 +313,7 @@ export async function POST(req: NextRequest) {
           body: `A guest needs staff assistance: "${message_text.slice(0, 80)}"`,
           requestType: 'CHAT_HANDOFF',
           roomNumber,
+          conversationId: convId,
           url: '/staff/chat',
           tag: `chat-handoff-${convId}`,
         })
@@ -322,6 +323,7 @@ export async function POST(req: NextRequest) {
           body: message_text.slice(0, 100),
           requestType: 'GUEST_CHAT',
           roomNumber,
+          conversationId: convId,
           url: '/staff/chat',
           tag: `guest-chat-${convId}`,
         })
@@ -333,6 +335,7 @@ export async function POST(req: NextRequest) {
         body: message_text.slice(0, 100),
         requestType: 'GUEST_CHAT',
         roomNumber,
+        conversationId: convId,
         url: '/staff/chat',
         tag: `guest-chat-${convId}`,
       })

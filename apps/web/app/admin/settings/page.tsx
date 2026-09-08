@@ -935,6 +935,8 @@ export default function HotelSettingsPage() {
                       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         {[
                           { id: 'CALL_REQUEST', label: 'Calls' },
+                          { id: 'GUEST_CHAT', label: 'Guest Chat' },
+                          { id: 'CHAT_HANDOFF', label: 'Handoff' },
                           { id: 'TASK', label: 'Tasks' },
                           { id: 'FOOD_ORDER', label: 'Food' },
                           { id: 'SPA_BOOKING', label: 'Spa' },

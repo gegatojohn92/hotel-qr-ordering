@@ -184,9 +184,30 @@ export default function GuestChatWidget() {
 
   // ── Resolve room/hotel if missing ────────────────────────────────────────
   useEffect(() => {
-    if (!roomId) return
-    setEffectiveRoomId(roomId)
-    getOrCreateGuestSessionId(roomId)
+    let resolvedRoom = roomId
+    if (!resolvedRoom && typeof window !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('hotel_guest_last_room_id')
+        if (stored) {
+          resolvedRoom = stored
+        } else {
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const k = sessionStorage.key(i)
+            if (k && k.startsWith('hotel_guest_session_')) {
+              resolvedRoom = k.replace('hotel_guest_session_', '')
+              break
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!resolvedRoom) return
+    setEffectiveRoomId(resolvedRoom)
+    try {
+      sessionStorage.setItem('hotel_guest_last_room_id', resolvedRoom)
+    } catch {}
+    getOrCreateGuestSessionId(resolvedRoom)
 
     if (hotelId) {
       setHotelIdResolved(hotelId)
@@ -199,7 +220,7 @@ export default function GuestChatWidget() {
       const { data } = await (supabase as any)
         .from('rooms')
         .select('hotel_id')
-        .eq('id', roomId)
+        .eq('id', resolvedRoom)
         .maybeSingle()
       if (data?.hotel_id) setHotelIdResolved(data.hotel_id)
     })()

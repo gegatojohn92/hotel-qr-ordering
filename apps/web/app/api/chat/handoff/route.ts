@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
       body: pushBody,
       requestType: 'CHAT_HANDOFF',
       roomNumber: roomData?.room_number,
+      conversationId: conversation_id,
       url: '/staff/chat',
       tag: `chat-handoff-${conversation_id}`,
     })
