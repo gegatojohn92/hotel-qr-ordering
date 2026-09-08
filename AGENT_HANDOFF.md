@@ -52,7 +52,21 @@ Key goals
 - Fix guest web QR access crash: split room validation from theme fetch so missing migration 24 columns don't show "Invalid QR Code" error — graceful fallback to DARK_GOLD defaults.
 - **PENDING**: Supabase account migration — current project (`bsjnlawhdgfilcfejbji.supabase.co`) has exhausted egress limits. Guide in `chat-history/2026-09-04_supabase-account-migration-guide.md`. Migrations 23 + 24 not yet applied to production.
 
-Recent session additions:
+- **Guest Chat FCM Push Notification Link & Alarm Execution (2026-09-08)**:
+  - **Problem**: When guests submitted messages in the guest web chat, staff devices running the Android staff-app were not receiving push notifications or audible alarms.
+  - **Root Cause Analysis**:
+    1. `apps/web/app/api/chat/send/route.ts`: During `BOT_ACTIVE` mode, push notifications were strictly gated behind `if (aiResponse.shouldEscalate)`. Regular guest messages never triggered any push notification to staff.
+    2. `apps/staff-app/lib/notifications.ts`: The client-side `canRoleReceiveNotification` filter for `FRONT_DESK` was missing `CHAT_HANDOFF` and `GUEST_CHAT`, causing local notification filtering to silently drop chat alerts.
+    3. `apps/staff-app/App.tsx`: The push response handler caught `CHAT_HANDOFF` and `GUEST_CHAT` and called `setRefreshKey` followed by an immediate `return`, failing to invoke `triggerAlarmNotification()`. Staff received no sound or vibration heads-up notification. In addition, foreground push reception lacked a refresh handler for incoming chat notifications.
+  - **Resolution**:
+    - `apps/web/app/api/chat/send/route.ts`: Updated to dispatch high-priority `GUEST_CHAT` pushes for all messages in `BOT_ACTIVE` mode so staff stay informed. Escalation continues to dispatch high-priority `CHAT_HANDOFF` alerts. Reused single `roomNumber` lookup to optimize database queries.
+    - `apps/staff-app/lib/notifications.ts`: Added `CHAT_HANDOFF` and `GUEST_CHAT` to the `FRONT_DESK` role permissions in `canRoleReceiveNotification`, matching server-side routing in `webPush.ts`.
+    - `apps/staff-app/App.tsx`: Added `triggerAlarmNotification()` on push response for chat events, ensuring staff get audible/vibrating heads-up alerts. Added `setRefreshKey` in `addNotificationReceivedListener` so foregrounded apps immediately update the chat list when a push arrives.
+- **Enhanced AI Concierge Knowledge Base & Dynamic Manila Time Context (2026-09-08)**:
+  - Updated `apps/web/lib/ai-assistant.ts` with comprehensive hotel details including all room types and rates (Standard, Deluxe, Suite, Executive, Family Suite, Penthouse), complete spa service menu (Swedish, Deep Tissue, Hot Stone, Aromatherapy, Shiatsu, Foot Reflexology), dry sauna operating hours (6:00 AM – 10:00 PM, ₱350/session or free for Suite/Penthouse), and Front Desk contact details.
+  - Added dynamic context injection passing room number, guest name, guest phone, formatted Manila local time (`Asia/Manila`), and 24-hour hour integer into `generateAiResponse()`.
+  - Added 18 rich fallback rules with regex triggers for spa prices, sauna, check-in/out, WiFi, breakfast, and front desk assistance.
+  - Implemented bold markdown rendering (`**text**`) in `apps/web/app/app/stay/components/GuestChatWidget.tsx` and updated quick prompts from pool to sauna hours.
 - **Guest Chat Session Isolation & Privacy Enforcement (2026-09-08)**:
   - **Problem**: Previously, guest chat conversations had fallback queries searching by `room_id` alone. When a new guest scanned the room's QR code on their phone, the chat drawer loaded the previous guest's conversation history, messages, and requests.
   - **Resolution**:
