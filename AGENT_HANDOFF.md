@@ -53,6 +53,16 @@ Key goals
 - **PENDING**: Supabase account migration — current project (`bsjnlawhdgfilcfejbji.supabase.co`) has exhausted egress limits. Guide in `chat-history/2026-09-04_supabase-account-migration-guide.md`. Migrations 23 + 24 not yet applied to production.
 
 Recent session additions:
+- **Guest Chat Session Isolation & Privacy Enforcement (2026-09-08)**:
+  - **Problem**: Previously, guest chat conversations had fallback queries searching by `room_id` alone. When a new guest scanned the room's QR code on their phone, the chat drawer loaded the previous guest's conversation history, messages, and requests.
+  - **Resolution**:
+    - **Database Migrations (`packages/supabase/migrations/28_add_guest_phone_session_id.sql` & `28_guest_chat_session_and_phone.sql`)**: Added `session_id` and `guest_phone` columns to `guest_conversations` table with performance indexes.
+    - **Purged Room-Level Fallback Queries (`apps/web/app/app/stay/components/GuestChatWidget.tsx`)**: Removed the room-wide query fallback from `loadConversation()`. Conversations are strictly loaded by matching the active guest session (`storedConvId` or `activeSessionId` in `sessionStorage`). If no match, state defaults to clean (`conversation = null`, `messages = []`), ensuring new guests see a clean welcome screen with zero leaked messages.
+    - **Backend Conversation Isolation (`apps/web/app/api/chat/send/route.ts`)**: Removed Step 1b room-level conversation recycling. When a message is sent without an existing conversation ID or session match, a brand-new conversation is always created.
+    - **Immediate Client Session Lifecycle (`PhoneCaptureModal.tsx` & `GuestSessionKeeper.tsx`)**: Implemented `getOrCreateGuestSessionId` and `generateClientSessionId` to ensure a UUID is stored in `sessionStorage` upon page visit, and `storeGuestConversationId` to lock the active conversation to the guest's tab.
+    - **Staff App UI Reorganization (`apps/staff-app/App.tsx`)**: Repositioned `<GuestChatModule />` to the bottom of the dashboard layout (below Request History & Logs) to keep operational queues clean and uncluttered.
+    - **Staff Active Chat Direct Dialing (`apps/staff-app/components/ActiveChatScreen.tsx`)**: Displays guest phone number beside room number in header with 1-tap direct dialing (`tel:`) support.
+    - **AI Assistant Policies Update (`apps/web/lib/ai-assistant.ts`)**: Updated hotel policies for check-in/out charges, WiFi password locations, housekeeping schedules, and complimentary amenities.
 - 2-Way Live Voice Calling between Guest Web and Staff App (Agora RTC):
   - Database (Migration 21): Added `agora_channel` column to `requests` table in `packages/supabase/migrations/21_live_call_channel.sql` & `apps/web/supabase/migrations/21_live_call_channel.sql`.
   - Server Token API (`apps/web/app/api/agora/token/route.ts` [NEW]): Generates 24-hour signed RTC tokens using `agora-access-token` server-side with `AGORA_APP_CERTIFICATE`.
