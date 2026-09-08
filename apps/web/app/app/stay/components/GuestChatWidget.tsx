@@ -33,7 +33,7 @@ const QUICK_PROMPTS = [
   '🕛 Check-out time?',
   '📶 WiFi password?',
   '💆 Spa booking?',
-  '🏊 Pool hours?',
+  'Sauna hours?',
 ]
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ export default function GuestChatWidget() {
     }
 
     // Fetch hotel_id from room record
-    ;(async () => {
+    ; (async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data } = await (supabase as any)
         .from('rooms')
@@ -365,12 +365,12 @@ export default function GuestChatWidget() {
   useEffect(() => {
     if (isOpen && conversation?.id) {
       setUnreadCount(0)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(supabase as any)
-        .from('guest_conversations')
-        .update({ unread_guest_count: 0 })
-        .eq('id', conversation.id)
-        .then(() => {})
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ; (supabase as any)
+          .from('guest_conversations')
+          .update({ unread_guest_count: 0 })
+          .eq('id', conversation.id)
+          .then(() => { })
     }
   }, [isOpen, conversation?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -514,8 +514,8 @@ export default function GuestChatWidget() {
   const headerSubtitle = isHandoff
     ? 'A staff member has joined your chat'
     : isResolved
-    ? 'Conversation resolved'
-    : 'Powered by Kekehyu AI'
+      ? 'Conversation resolved'
+      : 'Powered by Kekehyu AI'
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
