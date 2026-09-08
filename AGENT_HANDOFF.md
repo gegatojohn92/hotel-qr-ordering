@@ -83,6 +83,26 @@ Key goals
     - **Staff App UI Reorganization (`apps/staff-app/App.tsx`)**: Repositioned `<GuestChatModule />` to the bottom of the dashboard layout (below Request History & Logs) to keep operational queues clean and uncluttered.
     - **Staff Active Chat Direct Dialing (`apps/staff-app/components/ActiveChatScreen.tsx`)**: Displays guest phone number beside room number in header with 1-tap direct dialing (`tel:`) support.
     - **AI Assistant Policies Update (`apps/web/lib/ai-assistant.ts`)**: Updated hotel policies for check-in/out charges, WiFi password locations, housekeeping schedules, and complimentary amenities.
+- **Smart FCM Push Suppression, Notification Settings Centre & Gemini 3.6 Flash Upgrade (2026-09-08)**:
+  - **Push Suppression & Staff Presence**:
+    - **Problem**: Staff members received loud FCM pushes for every guest message even while actively viewing or typing in that same conversation.
+    - **Database Migration 29 (`packages/supabase/migrations/29_push_suppression_and_prefs.sql`)**:
+      - Created `public.staff_presence` table tracking active conversation ID and `last_seen_at` heartbeat timestamp.
+      - Extended `notification_settings` with `suppress_if_active`, `push_cooldown_seconds`, `quiet_hours_enabled`, `quiet_hours_from`, `quiet_hours_to`.
+      - Extended `staff_users` with `mute_guest_chat_push`, `suppress_push_when_active`, `quiet_hours_from_override`, `quiet_hours_to_override`.
+      - Added `last_push_sent_at` column to `guest_conversations` for audit trail & cooldown tracking.
+    - **Presence Hook (`apps/staff-app/hooks/useStaffPresence.ts`)**: Automatically upserts presence on entering `ActiveChatScreen`, maintains a 30s heartbeat, and cleans up on unmount or return to conversation list.
+    - **Push Gatekeeper (`apps/web/lib/webPush.ts`)**: Filters muted staff, checks real-time presence (<90s staleness threshold), enforces conversation cooldown (30s default; urgent escalations bypass cooldown), and honors quiet hours (Manila Time).
+  - **Notification Settings Centre**:
+    - **Staff App (`apps/staff-app/screens/NotificationSettingsScreen.tsx`)**: Full personal notification preferences screen (Mute all chat pushes, suppress while active, personal quiet hours override) accessible via **`🔔 Alerts`** button in the tablet header.
+    - **Web Admin (`apps/web/app/admin/settings/page.tsx`)**: New "Push Notification Behaviour & Smart Suppression" section in Hotel Settings with toggles for active suppression, cooldown slider (0-180s), and hotel-wide quiet hours.
+  - **Gemini 3.6 Flash Upgrade & Bug Fixes (`apps/web/lib/ai-assistant.ts` & `/api/chat/send/route.ts`)**:
+    - **Model Deprecation Fix**: Google deprecated older flash endpoints (`gemini-2.0-flash` returned 404, `gemini-1.5-flash` not found for v1beta). Upgraded primary model to **`gemini-3.6-flash`** with configurable fallback list.
+    - **Multi-Turn Role Alternation Bug**: Fixed bug in `/api/chat/send/route.ts` where querying `guest_chat_messages` included the just-inserted message, sending two consecutive `user` turns to Gemini which resulted in 400 Bad Request. Added `.neq('id', guestMsg.id)`.
+    - **Turn Sanitizer**: Built turn sanitizer in `callGemini` ensuring conversation starts with `user`, merges consecutive same-role turns into multi-part items, and deduplicates trailing turns.
+    - **Environment Loading**: Added `.env.local` with `GEMINI_API_KEY` and `GEMINI_MODEL=gemini-3.6-flash`. Verified live with stay context (Room 402, pricing, smart replies).
+  - **Staff App Header UI Polish (`apps/staff-app/App.tsx`)**:
+    - Vertically stacked `⚡ Sync` and `🔔 Alerts` in a single column to reclaim over 110px of horizontal room, preventing "Front Desk Tablet Interface" from stretching or wrapping awkwardly.
 - 2-Way Live Voice Calling between Guest Web and Staff App (Agora RTC):
   - Database (Migration 21): Added `agora_channel` column to `requests` table in `packages/supabase/migrations/21_live_call_channel.sql` & `apps/web/supabase/migrations/21_live_call_channel.sql`.
   - Server Token API (`apps/web/app/api/agora/token/route.ts` [NEW]): Generates 24-hour signed RTC tokens using `agora-access-token` server-side with `AGORA_APP_CERTIFICATE`.

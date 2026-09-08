@@ -381,19 +381,49 @@ async function callGemini(
 
   if (!apiKey) return null
 
-  // Models to try in order of priority
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash']
+  // Models to try in order of priority (configurable via GEMINI_MODEL env var)
+  const preferredModel = process.env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash'
+  const fallbackModels = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+  const models = Array.from(new Set([preferredModel, ...fallbackModels]))
 
-  const contents = [
-    ...history.map((m) => ({
-      role: m.role,
-      parts: [{ text: m.text }],
-    })),
-    {
-      role: 'user' as const,
-      parts: [{ text: currentMessage }],
-    },
-  ]
+  // 1. Build sanitized alternating turn history
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = []
+
+  for (const m of history) {
+    const text = m.text?.trim()
+    if (!text) continue
+
+    // Gemini requires multi-turn conversation to start with 'user'
+    if (contents.length === 0 && m.role !== 'user') {
+      continue
+    }
+
+    const last = contents[contents.length - 1]
+    if (last && last.role === m.role) {
+      // Merge consecutive same-role turns into multiple parts
+      last.parts.push({ text })
+    } else {
+      contents.push({
+        role: m.role,
+        parts: [{ text }],
+      })
+    }
+  }
+
+  // 2. Append current user message (or merge if trailing was already user)
+  const trimmedCurrent = currentMessage.trim()
+  const last = contents[contents.length - 1]
+  if (last && last.role === 'user') {
+    const hasCurrent = last.parts.some((p) => p.text.trim() === trimmedCurrent)
+    if (!hasCurrent) {
+      last.parts.push({ text: trimmedCurrent })
+    }
+  } else {
+    contents.push({
+      role: 'user',
+      parts: [{ text: trimmedCurrent }],
+    })
+  }
 
   const systemPrompt = buildDynamicSystemPrompt(context)
 
@@ -427,7 +457,11 @@ async function callGemini(
           return text.trim()
         }
       } else {
-        console.warn(`[AI] Gemini ${model} returned ${response.status}`)
+        const errJson = await response.json().catch(() => null)
+        console.warn(
+          `[AI] Gemini ${model} returned ${response.status}:`,
+          errJson?.error?.message || response.statusText
+        )
       }
     } catch (err) {
       console.warn(`[AI] Gemini ${model} fetch error:`, err)
@@ -530,33 +564,39 @@ ${historyText}
 
 Return ONLY a JSON array of 3 strings, no explanation. Example: ["Reply 1", "Reply 2", "Reply 3"]`
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 150, temperature: 0.3 },
-      }),
-    })
+  const preferredModel = process.env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash'
+  const fallbackModels = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+  const models = Array.from(new Set([preferredModel, ...fallbackModels]))
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 150, temperature: 0.3 },
+        }),
+      })
 
-    if (!response.ok) return DEFAULT_REPLIES
+      if (response.ok) {
+        const data = await response.json()
+        const rawText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
 
-    const data = await response.json()
-    const rawText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-
-    const startIdx = rawText.indexOf('[')
-    const endIdx = rawText.lastIndexOf(']')
-    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return DEFAULT_REPLIES
-    const jsonMatch = rawText.slice(startIdx, endIdx + 1)
-
-    const parsed = JSON.parse(jsonMatch)
-    if (Array.isArray(parsed) && parsed.length >= 3) {
-      return parsed.slice(0, 3).map((s: unknown) => String(s))
+        const startIdx = rawText.indexOf('[')
+        const endIdx = rawText.lastIndexOf(']')
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          const jsonMatch = rawText.slice(startIdx, endIdx + 1)
+          const parsed = JSON.parse(jsonMatch)
+          if (Array.isArray(parsed) && parsed.length >= 3) {
+            return parsed.slice(0, 3).map((s: unknown) => String(s))
+          }
+        }
+      }
+    } catch {
+      // try next model
     }
-    return DEFAULT_REPLIES
-  } catch {
-    return DEFAULT_REPLIES
   }
+
+  return DEFAULT_REPLIES
 }

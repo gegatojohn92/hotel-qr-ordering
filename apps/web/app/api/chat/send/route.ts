@@ -232,6 +232,7 @@ export async function POST(req: NextRequest) {
         .from('guest_chat_messages')
         .select('sender_type, message_text')
         .eq('conversation_id', convId)
+        .neq('id', guestMsg.id)
         .order('created_at', { ascending: false })
         .limit(10)
 

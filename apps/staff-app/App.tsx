@@ -1418,7 +1418,7 @@ function MainAppContent() {
                 {activeStaffUser?.role === 'KITCHEN' ? 'Kitchen & Room Service Portal' : 'Tablet Interface'}
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               {activeStaffUser?.role === 'KITCHEN' && (
                 <TouchableOpacity
                   onPress={handleCallFnb}
@@ -1431,23 +1431,26 @@ function MainAppContent() {
                   </Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
-                onPress={() => setShowNotifSettings(true)}
-                style={styles.notifSettingsButton}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.notifSettingsButtonText}>🔔 Alerts</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleManualSync}
-                style={[styles.syncButton, isManualSyncing && styles.syncButtonActive]}
-                activeOpacity={0.8}
-                disabled={isManualSyncing}
-              >
-                <Text style={styles.syncButtonText}>
-                  {isManualSyncing ? '⟳ Syncing…' : '⚡ Sync'}
-                </Text>
-              </TouchableOpacity>
+              {/* Stacked Sync & Alerts Column */}
+              <View style={{ flexDirection: 'column', gap: 6 }}>
+                <TouchableOpacity
+                  onPress={handleManualSync}
+                  style={[styles.syncButton, isManualSyncing && styles.syncButtonActive]}
+                  activeOpacity={0.8}
+                  disabled={isManualSyncing}
+                >
+                  <Text style={styles.syncButtonText}>
+                    {isManualSyncing ? '⟳ Syncing…' : '⚡ Sync'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowNotifSettings(true)}
+                  style={styles.notifSettingsButton}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.notifSettingsButtonText}>🔔 Alerts</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity onPress={handleLogout} style={styles.logoutButton} activeOpacity={0.9}>
                 <Text style={styles.logoutButtonText}>↩ Logout</Text>
               </TouchableOpacity>
@@ -1809,22 +1812,24 @@ const styles = StyleSheet.create({
   headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 14,
   },
   headerMeta: {
     flex: 1,
+    marginRight: 8,
   },
   headerIcon: {
-    fontSize: 40,
+    fontSize: 38,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
     color: COLORS.textPrimary,
     letterSpacing: -0.5,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
   },
@@ -1833,8 +1838,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(248,113,113,0.45)',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowColor: '#7f1d1d',
     shadowOpacity: 0.28,
     shadowRadius: 12,
@@ -1850,25 +1857,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(99,102,241,0.15)',
     borderWidth: 1,
     borderColor: 'rgba(99,102,241,0.4)',
-    paddingHorizontal: 13,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
   notifSettingsButtonText: {
     color: '#a5b4fc',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   syncButton: {
     backgroundColor: 'rgba(251,191,36,0.14)',
     borderWidth: 1,
     borderColor: 'rgba(251,191,36,0.4)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1884,7 +1891,7 @@ const styles = StyleSheet.create({
   },
   syncButtonText: {
     color: COLORS.gold,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
