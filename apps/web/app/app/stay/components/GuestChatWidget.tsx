@@ -106,6 +106,28 @@ function formatTime(iso: string): string {
   }
 }
 
+function renderFormattedMessage(text: string) {
+  if (!text) return null
+  const lines = text.split('\n')
+  return lines.map((line, lIdx) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g)
+    return (
+      <span key={lIdx} style={{ display: 'block', minHeight: line.trim() ? undefined : '0.5em' }}>
+        {parts.map((part, pIdx) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return (
+              <strong key={pIdx} style={{ fontWeight: 700, color: 'inherit' }}>
+                {part.slice(2, -2)}
+              </strong>
+            )
+          }
+          return part
+        })}
+      </span>
+    )
+  })
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function GuestChatWidget() {
@@ -766,9 +788,9 @@ export default function GuestChatWidget() {
                     ...getBubbleStyle(msg.sender_type, msg.isOptimistic),
                   }}
                 >
-                  <p style={{ margin: 0, fontSize: '13.5px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                    {msg.message_text}
-                  </p>
+                  <div style={{ margin: 0, fontSize: '13.5px', lineHeight: 1.5 }}>
+                    {renderFormattedMessage(msg.message_text)}
+                  </div>
                 </div>
                 {/* Timestamp */}
                 {msg.sender_type !== 'SYSTEM' && (

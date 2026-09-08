@@ -231,7 +231,45 @@ export async function POST(req: NextRequest) {
           text: m.message_text,
         }))
 
-      const aiResponse = await generateAiResponse(message_text.trim(), history)
+      // Resolve room number and live time context for rich AI answers
+      let roomNumber: string | undefined = undefined
+      try {
+        const { data: roomRecord } = await supabase
+          .from('rooms')
+          .select('room_number')
+          .eq('id', room_id)
+          .maybeSingle()
+        if (roomRecord?.room_number) {
+          roomNumber = String(roomRecord.room_number)
+        }
+      } catch {
+        // non-blocking
+      }
+
+      const now = new Date()
+      const localTime = now.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true,
+      })
+      const manilaHour = parseInt(
+        now.toLocaleString('en-US', {
+          timeZone: 'Asia/Manila',
+          hour: 'numeric',
+          hour12: false,
+        }),
+        10
+      )
+
+      const aiResponse = await generateAiResponse(message_text.trim(), history, {
+        roomNumber,
+        guestName: sender_name || guest_name || 'Guest',
+        guestPhone: effectivePhoneForPush || undefined,
+        localTime,
+        hour24: isNaN(manilaHour) ? undefined : manilaHour,
+      })
 
       // Insert AI response
       const { data: aiMsg } = await supabase
