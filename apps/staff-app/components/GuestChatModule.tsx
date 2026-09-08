@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Linking,
+  Alert,
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -51,21 +53,42 @@ export default function GuestChatModule({
   const realtimeRef = useRef<RealtimeChannel | null>(null)
 
   const loadConversations = useCallback(async () => {
-    const { data } = await (supabase as any)
-      .from('guest_conversations')
-      .select('*')
-      .eq('hotel_id', hotelId)
-      .order('last_message_at', { ascending: false })
-      .limit(50)
+    try {
+      const { data, error } = await (supabase as any)
+        .from('guest_conversations')
+        .select('*, rooms(room_number)')
+        .eq('hotel_id', hotelId)
+        .order('last_message_at', { ascending: false })
+        .limit(50)
 
-    if (data) {
-      setConversations(data as GuestConversation[])
-      const handoffUnread = (data as GuestConversation[])
-        .filter((c) => c.status === 'STAFF_HANDOFF')
-        .reduce((acc, c) => acc + (c.unread_staff_count || 0), 0)
-      setUnreadHandoff(handoffUnread)
+      if (!error && data) {
+        setConversations(data as GuestConversation[])
+        const handoffUnread = (data as GuestConversation[])
+          .filter((c) => c.status === 'STAFF_HANDOFF')
+          .reduce((acc, c) => acc + (c.unread_staff_count || 0), 0)
+        setUnreadHandoff(handoffUnread)
+      } else {
+        // Fallback without relation join if needed
+        const { data: fallbackData } = await (supabase as any)
+          .from('guest_conversations')
+          .select('*')
+          .eq('hotel_id', hotelId)
+          .order('last_message_at', { ascending: false })
+          .limit(50)
+
+        if (fallbackData) {
+          setConversations(fallbackData as GuestConversation[])
+          const handoffUnread = (fallbackData as GuestConversation[])
+            .filter((c) => c.status === 'STAFF_HANDOFF')
+            .reduce((acc, c) => acc + (c.unread_staff_count || 0), 0)
+          setUnreadHandoff(handoffUnread)
+        }
+      }
+    } catch (err) {
+      console.error('Error loading guest conversations:', err)
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
   }, [hotelId])
 
   useEffect(() => { loadConversations() }, [loadConversations])
@@ -107,6 +130,12 @@ export default function GuestChatModule({
   ]
 
   const filteredConvs = conversations.filter((c) => c.status === activeTab)
+
+  const handleCallGuestDirect = (phone: string) => {
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      Alert.alert('Cannot Open Dialer', 'Unable to open the phone dialer on this device.')
+    )
+  }
 
   return (
     <View style={styles.module}>
@@ -164,55 +193,70 @@ export default function GuestChatModule({
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
-          {filteredConvs.map((conv) => (
-            <TouchableOpacity
-              key={conv.id}
-              style={styles.convCard}
-              onPress={() => setActiveConversation(conv)}
-              activeOpacity={0.8}
-            >
-              <View
-                style={[
-                  styles.convAvatar,
-                  {
-                    backgroundColor:
-                      conv.status === 'STAFF_HANDOFF'
-                        ? 'rgba(99,102,241,0.15)'
-                        : conv.status === 'BOT_ACTIVE'
-                        ? 'rgba(167,139,250,0.15)'
-                        : 'rgba(74,222,128,0.1)',
-                  },
-                ]}
+          {filteredConvs.map((conv) => {
+            const roomNumber = conv.rooms?.room_number || (conv.room_id ? `…${conv.room_id.slice(-4).toUpperCase()}` : 'Room')
+            return (
+              <TouchableOpacity
+                key={conv.id}
+                style={styles.convCard}
+                onPress={() => setActiveConversation(conv)}
+                activeOpacity={0.8}
               >
-                <Text style={styles.convAvatarIcon}>
-                  {conv.status === 'STAFF_HANDOFF' ? '🧑‍💼' : conv.status === 'BOT_ACTIVE' ? '🤖' : '✅'}
-                </Text>
-              </View>
-
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={styles.convRow}>
-                  <Text style={styles.convTitle} numberOfLines={1}>
-                    {conv.guest_name || 'Guest'} · …{conv.room_id?.slice(-4).toUpperCase()}
+                <View
+                  style={[
+                    styles.convAvatar,
+                    {
+                      backgroundColor:
+                        conv.status === 'STAFF_HANDOFF'
+                          ? 'rgba(99,102,241,0.15)'
+                          : conv.status === 'BOT_ACTIVE'
+                          ? 'rgba(167,139,250,0.15)'
+                          : 'rgba(74,222,128,0.1)',
+                    },
+                  ]}
+                >
+                  <Text style={styles.convAvatarIcon}>
+                    {conv.status === 'STAFF_HANDOFF' ? '🧑‍💼' : conv.status === 'BOT_ACTIVE' ? '🤖' : '✅'}
                   </Text>
-                  <Text style={styles.convTime}>{timeAgo(conv.last_message_at)}</Text>
                 </View>
-                <Text style={styles.convSnippet} numberOfLines={1}>
-                  {conv.last_message_sender === 'AI'
-                    ? '🤖 '
-                    : conv.last_message_sender === 'STAFF'
-                    ? '🧑‍💼 '
-                    : '👤 '}
-                  {conv.last_message_text || 'No messages yet'}
-                </Text>
-              </View>
 
-              {(conv.unread_staff_count || 0) > 0 && (
-                <View style={styles.unreadPill}>
-                  <Text style={styles.unreadPillText}>{conv.unread_staff_count}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.convRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 6 }}>
+                      <Text style={styles.convTitle} numberOfLines={1}>
+                        Room {roomNumber} · {conv.guest_name || 'Guest'}
+                      </Text>
+                      {conv.guest_phone ? (
+                        <TouchableOpacity
+                          style={styles.directPhoneBadge}
+                          onPress={() => handleCallGuestDirect(conv.guest_phone!)}
+                          activeOpacity={0.7}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={styles.directPhoneBadgeText}>📞 {conv.guest_phone}</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <Text style={styles.convTime}>{timeAgo(conv.last_message_at)}</Text>
+                  </View>
+                  <Text style={styles.convSnippet} numberOfLines={1}>
+                    {conv.last_message_sender === 'AI'
+                      ? '🤖 '
+                      : conv.last_message_sender === 'STAFF'
+                      ? '🧑‍💼 '
+                      : '👤 '}
+                    {conv.last_message_text || 'No messages yet'}
+                  </Text>
                 </View>
-              )}
-            </TouchableOpacity>
-          ))}
+
+                {(conv.unread_staff_count || 0) > 0 && (
+                  <View style={styles.unreadPill}>
+                    <Text style={styles.unreadPillText}>{conv.unread_staff_count}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )
+          })}
         </ScrollView>
       )}
     </View>
@@ -321,4 +365,19 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   unreadPillText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  directPhoneBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  directPhoneBadgeText: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: '700',
+  },
 })

@@ -8,7 +8,7 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PU
 
 export async function POST(req: NextRequest) {
   try {
-    const { conversation_id, hotel_id, room_id, message_text, sender_name, guest_name } =
+    const { conversation_id, hotel_id, room_id, session_id, guest_phone, message_text, sender_name, guest_name } =
       await req.json()
 
     if (!hotel_id || !room_id || !message_text?.trim()) {
@@ -21,26 +21,54 @@ export async function POST(req: NextRequest) {
     let convId = conversation_id as string | null
 
     if (!convId) {
-      // Try to find an existing non-resolved conversation for this room
-      const { data: existing } = await supabase
+      // Try to find an existing non-resolved conversation for this room and session
+      let query = supabase
         .from('guest_conversations')
-        .select('id, status')
+        .select('id, status, guest_phone')
         .eq('hotel_id', hotel_id)
         .eq('room_id', room_id)
         .neq('status', 'RESOLVED')
         .order('created_at', { ascending: false })
         .limit(1)
-        .maybeSingle()
+
+      if (session_id) {
+        query = query.eq('session_id', session_id)
+      }
+
+      const { data: existing } = await query.maybeSingle()
 
       if (existing) {
         convId = existing.id
       } else {
+        // Resolve effective guest phone if not passed directly
+        let effectivePhone = guest_phone ? String(guest_phone).trim() : null
+        if (!effectivePhone) {
+          let sessQuery = supabase
+            .from('guest_sessions')
+            .select('phone_number')
+            .order('created_at', { ascending: false })
+            .limit(1)
+
+          if (session_id) {
+            sessQuery = sessQuery.eq('id', session_id)
+          } else {
+            sessQuery = sessQuery.eq('room_id', room_id)
+          }
+
+          const { data: sessData } = await sessQuery.maybeSingle()
+          if (sessData?.phone_number) {
+            effectivePhone = sessData.phone_number
+          }
+        }
+
         // Create new conversation
         const { data: newConv, error: convErr } = await supabase
           .from('guest_conversations')
           .insert({
             hotel_id,
             room_id,
+            session_id: session_id || null,
+            guest_phone: effectivePhone || null,
             status: 'BOT_ACTIVE',
             guest_name: guest_name || sender_name || 'Guest',
             last_message_text: message_text,
@@ -60,7 +88,7 @@ export async function POST(req: NextRequest) {
     // ── 2. Fetch current conversation state ────────────────────────────────
     const { data: conv } = await supabase
       .from('guest_conversations')
-      .select('id, status, unread_staff_count')
+      .select('id, status, unread_staff_count, guest_phone')
       .eq('id', convId)
       .single()
 
@@ -89,16 +117,26 @@ export async function POST(req: NextRequest) {
 
     // ── 4. Update conversation last message ────────────────────────────────
     const newUnreadStaff = (conv.unread_staff_count || 0) + 1
+    const convUpdatePayload: Record<string, any> = {
+      last_message_text: message_text.trim(),
+      last_message_sender: 'GUEST',
+      last_message_at: new Date().toISOString(),
+      unread_staff_count: newUnreadStaff,
+      updated_at: new Date().toISOString(),
+    }
+    if (guest_phone?.trim() && !conv.guest_phone) {
+      convUpdatePayload.guest_phone = guest_phone.trim()
+    }
+    if (session_id) {
+      convUpdatePayload.session_id = session_id
+    }
+
     await supabase
       .from('guest_conversations')
-      .update({
-        last_message_text: message_text.trim(),
-        last_message_sender: 'GUEST',
-        last_message_at: new Date().toISOString(),
-        unread_staff_count: newUnreadStaff,
-        updated_at: new Date().toISOString(),
-      })
+      .update(convUpdatePayload)
       .eq('id', convId)
+
+    const effectivePhoneForPush = convUpdatePayload.guest_phone || conv.guest_phone
 
     // ── 5. AI Auto-Reply (if BOT_ACTIVE) ───────────────────────────────────
     let aiMessage: { id: string; message_text: string; created_at: string } | null = null
@@ -170,8 +208,9 @@ export async function POST(req: NextRequest) {
           .eq('id', room_id)
           .maybeSingle()
 
+        const phoneInfo = effectivePhoneForPush ? ` · 📞 ${effectivePhoneForPush}` : ''
         await sendWebPushToHotelStaff(hotel_id, {
-          title: `💬 Guest Chat – Room ${roomData?.room_number || '?'}`,
+          title: `💬 Guest Chat – Room ${roomData?.room_number || '?'}${phoneInfo}`,
           body: `A guest needs staff assistance: "${message_text.slice(0, 80)}"`,
           requestType: 'CHAT_HANDOFF',
           roomNumber: roomData?.room_number,
@@ -187,8 +226,9 @@ export async function POST(req: NextRequest) {
         .eq('id', room_id)
         .maybeSingle()
 
+      const phoneInfo = effectivePhoneForPush ? ` · 📞 ${effectivePhoneForPush}` : ''
       await sendWebPushToHotelStaff(hotel_id, {
-        title: `💬 Guest Message – Room ${roomData?.room_number || '?'}`,
+        title: `💬 Guest Message – Room ${roomData?.room_number || '?'}${phoneInfo}`,
         body: message_text.slice(0, 100),
         requestType: 'GUEST_CHAT',
         roomNumber: roomData?.room_number,

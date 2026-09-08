@@ -1,23 +1,21 @@
-# Feature Blueprint: Real-Time Guest & Staff Chat with Hybrid AI Assistant
+# Feature Blueprint: Guest Chat Session Isolation, Phone Capture & Staff App Room/Call Enhancements
 
 ## 1. System Overview & Objectives
-This feature implements an end-to-end, bi-directional real-time messaging architecture connecting hotel guests on `apps/web` (Next.js PWA) with hotel staff on `apps/staff-app` (React Native Expo Android & PWA). 
+This feature enhances the real-time guest and staff hybrid chat architecture across `apps/web` (Guest Concierge Web App) and `apps/staff-app` (Staff Android & Tablet App). It introduces guest session isolation for data privacy, pre-chat phone capture for guaranteed reachability, accurate hotel room number resolution, and one-tap direct dialing for staff.
 
-### Key Capabilities:
-1. **Hybrid AI Assistant**:
-   - Automated instant AI responses for hotel FAQs (amenities, dining hours, WiFi, check-out policy, directions) powered by Gemini AI with custom hotel knowledge prompts.
-   - Real-time escalation to human staff when requested by the guest or when the AI detects complex requests.
-2. **Guest Web Chat Interface**:
-   - Persistent floating action button (FAB) with live unread badge across all `/app/stay/*` pages.
-   - Glassmorphic chat drawer with distinct message bubbles for Guest (Gold), AI Assistant (Dark Bot), and Human Staff (Indigo).
-   - Realtime Supabase WebSockets for instant message streaming and live typing presence.
-3. **Staff App Live Guest Messaging Module**:
-   - Dedicated conversation queue split by status tabs: **Active Handoffs** (`STAFF_HANDOFF`), **AI Bot Managed** (`BOT_ACTIVE`), and **Resolved** (`RESOLVED`).
-   - Active chat screen with 1-tap **Claim Conversation** and **Mark Resolved** controls.
-   - **AI Smart Reply Suggestions**: 3 dynamically generated contextual quick-replies based on the conversation history to accelerate staff response times.
-4. **Push Notifications & Synchronization**:
-   - High-priority FCM push notifications sent to Front Desk & Admin staff whenever a guest escalates to staff or sends a message while in `STAFF_HANDOFF`.
-   - Realtime WebSocket channels (`supabase_realtime`) for zero-latency bidirectional updates.
+### Core Problems & Architectural Solutions:
+1. **Guest Chat Privacy & Cross-Guest History Leakage**:
+   - **Problem**: Conversations in `guest_conversations` were previously queried and created purely by `room_id`. If Guest A from Room 302 checked out or closed their session and Guest B checked into Room 302 and scanned the room's QR code, Guest B could view Guest A's previous conversation history, complaints, and personal details.
+   - **Solution**: Bind each conversation to an active `guest_sessions` record (`session_id`). In `apps/web`, query and filter chat history strictly by `room_id` **AND** `session_id`. When a new guest scans the QR code, a fresh guest session is initialized, ensuring a completely blank, private conversation history.
+2. **Chat Disconnection Fallback & Pre-Chat Phone Requirement**:
+   - **Problem**: Guests who chat with the AI bot or request staff handoff frequently switch tabs, lock their phones, or experience disconnections. If staff replies minutes later, the response is missed.
+   - **Solution**: When a guest clicks or uses the chat bot FAB, trigger `PhoneCaptureModal` if a verified phone number is not yet present in session storage. The captured phone number is saved to `guest_sessions` and `guest_conversations.guest_phone` for staff callback.
+3. **Incorrect Room Number in Staff App**:
+   - **Problem**: `GuestChatModule` and `ActiveChatScreen` displayed raw UUID trailing slices (e.g., `…B84F`) instead of the human-readable room number.
+   - **Solution**: Execute relational joins (`.select('*, rooms(room_number)')`), matching the pattern of `CallQueue`, `DedicatedCallModule`, and `TaskQueue` to display `Room 302`.
+4. **Direct Phone Call Mode for Staff**:
+   - **Problem**: Staff handling chat escalations had no one-touch method to ring the guest directly for urgent questions.
+   - **Solution**: Render a clickable phone badge beside the room number in both the conversation queue card and the active chat header, triggering `Linking.openURL('tel:${phone}')`.
 
 ---
 
@@ -25,129 +23,139 @@ This feature implements an end-to-end, bi-directional real-time messaging archit
 
 ### Files to Modify:
 1. [`packages/supabase/types/index.ts`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/packages/supabase/types/index.ts):
-   - Add TypeScript definitions for `guest_conversations` and `guest_chat_messages` tables.
-2. [`apps/web/lib/webPush.ts`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/lib/webPush.ts):
-   - Add `GUEST_CHAT` and `CHAT_HANDOFF` request types to role-based routing (`FRONT_DESK`, `ADMIN`, `MANAGER`).
-3. [`apps/web/app/app/stay/layout.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/app/stay/layout.tsx) & [`StayRootClientWrapper.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/app/stay/components/StayRootClientWrapper.tsx):
-   - Mount the global floating `GuestChatWidget` across all guest concierge pages.
-4. [`apps/staff-app/App.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/staff-app/App.tsx):
-   - Add navigation tab/section for `GuestChatModule` with live unread badge counter.
-   - Wire incoming chat push notification handlers.
+   - Add `session_id?: string | null` and `guest_phone?: string | null` to `GuestConversation` interface.
+   - Add relational `rooms?: { room_number: string } | null` typing.
+   - Update Database schema typing for `guest_conversations`.
+2. [`apps/web/app/app/stay/components/PhoneCaptureModal.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/app/stay/components/PhoneCaptureModal.tsx):
+   - Add optional `title?: string` and `description?: string` props with backward-compatible defaults.
+   - Ensure the newly inserted `guest_sessions.id` is saved to `sessionStorage.setItem('hotel_guest_session_${roomId}', sessionData.id)` to guarantee immediate session synchronization.
+3. [`apps/web/app/app/stay/components/GuestChatWidget.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/app/stay/components/GuestChatWidget.tsx):
+   - Read active `sessionId` from `sessionStorage.getItem('hotel_guest_session_${roomId}')`.
+   - Update `loadConversation`: query `guest_conversations` where `room_id = effectiveRoomId AND session_id = sessionId AND status != 'RESOLVED'`.
+   - When the guest clicks the chat FAB or attempts to send a message, verify if `getStoredGuestPhone()` exists. If missing, show `PhoneCaptureModal` with chat-specific guidance ("Please enter your mobile phone number in case the chat disconnects or staff needs to follow up on your request").
+   - Include both `session_id` and `guest_phone` when posting to `/api/chat/send`.
+4. [`apps/web/app/api/chat/send/route.ts`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/api/chat/send/route.ts):
+   - Receive `session_id` and `guest_phone` in the request body.
+   - When searching for existing active conversations, match `room_id = room_id AND session_id = session_id AND status != 'RESOLVED'`.
+   - When creating a new conversation, record `session_id` and `guest_phone`.
+   - If `guest_phone` is omitted, fallback to querying `guest_sessions` by `session_id` or `room_id`.
+5. [`apps/web/app/api/chat/handoff/route.ts`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/web/app/api/chat/handoff/route.ts):
+   - Include `guest_phone` in push notification payload (`[Phone: ${phone}]`) sent to Front Desk staff.
+6. [`apps/staff-app/components/GuestChatModule.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/staff-app/components/GuestChatModule.tsx):
+   - Update query to `.select('*, rooms(room_number)')`.
+   - Replace UUID slice (`…${conv.room_id.slice(-4)}`) with `Room ${conv.rooms?.room_number || 'Room'}`.
+   - Render a direct-dial badge beside the room number (`📞 ${conv.guest_phone}`) invoking `Linking.openURL('tel:${conv.guest_phone}')`.
+7. [`apps/staff-app/components/ActiveChatScreen.tsx`](file:///c:/Users/ADMIN/Videos/qr/hotel-qr-ordering-system/apps/staff-app/components/ActiveChatScreen.tsx):
+   - Update `GuestConversation` interface with `session_id`, `guest_phone`, and `rooms?: { room_number: string } | null`.
+   - Display `Room ${conversation.rooms?.room_number || 'Room'}` in the header.
+   - Add a direct-dial phone button beside room title in header (`📞 Call ${phone}`) invoking `Linking.openURL('tel:${phone}')`.
 
 ### New Files to Create:
-1. **Database Migration**:
-   - `packages/supabase/migrations/27_guest_staff_hybrid_ai_chat.sql`
-2. **Backend & AI Engine (`apps/web`)**:
-   - `apps/web/lib/ai-assistant.ts`: Gemini API integration with hotel knowledge base, prompt templates, and fallback rule engine.
-   - `apps/web/app/api/chat/send/route.ts`: Core message ingestion, AI auto-reply trigger, and FCM push dispatcher.
-   - `apps/web/app/api/chat/ai-smart-replies/route.ts`: Endpoint generating 3 contextual quick-replies for staff.
-   - `apps/web/app/api/chat/handoff/route.ts`: Endpoint for escalating conversations to human staff.
-   - `apps/web/app/api/chat/resolve/route.ts`: Endpoint for staff to mark conversations as resolved.
-3. **Guest Web Components (`apps/web`)**:
-   - `apps/web/app/app/stay/components/GuestChatWidget.tsx`: FAB, glassmorphic modal, message list, typing indicator, and quick-prompt chips.
-4. **Staff App Components (`apps/staff-app`)**:
-   - `apps/staff-app/components/GuestChatModule.tsx`: Conversation queue tabs (Active / Bot / Resolved), room cards, search, and unread counts.
-   - `apps/staff-app/components/ActiveChatScreen.tsx`: Full-screen staff chat view, message bubbles, AI smart reply chips, claim/resolve actions, and typing indicator.
+1. `packages/supabase/migrations/28_guest_chat_session_and_phone.sql`:
+   - Adds `session_id UUID REFERENCES public.guest_sessions(id) ON DELETE SET NULL` to `public.guest_conversations`.
+   - Adds `guest_phone TEXT` to `public.guest_conversations`.
+   - Creates indexes `idx_guest_conversations_session_id` and `idx_guest_conversations_guest_phone`.
 
 ### Dependencies/Packages:
-- **`apps/web`**: Standard Next.js + `@google/genai` (or native fetch to Gemini REST API) + `@hotel-qr/supabase`. No breaking native dependencies.
-- **`apps/staff-app`**: Pure React Native TypeScript components (uses existing `@supabase/supabase-js`, `expo-notifications`, and `AsyncStorage`). **100% OTA-Safe**.
+- Pure TypeScript/React Native implementation. No new packages required.
+- **100% OTA-Safe** for Expo Android builds.
 
 ---
 
 ## 3. Step-by-Step Execution Checklist
 
-### Phase 1: Database & Type System
-- [x] Task 1.1: Create SQL migration `packages/supabase/migrations/27_guest_staff_hybrid_ai_chat.sql` containing:
-  - `guest_conversations` table (`id`, `hotel_id`, `room_id`, `status`, `assigned_staff_id`, `guest_name`, `unread_guest_count`, `unread_staff_count`, `last_message_text`, `last_message_sender`, `last_message_at`, `created_at`, `updated_at`).
-  - `guest_chat_messages` table (`id`, `conversation_id`, `hotel_id`, `room_id`, `sender_type`, `sender_staff_id`, `sender_name`, `message_text`, `is_read`, `created_at`).
-  - Status constraints: `BOT_ACTIVE`, `STAFF_HANDOFF`, `RESOLVED`.
-  - Sender constraints: `GUEST`, `AI`, `STAFF`, `SYSTEM`.
-  - RLS policies and Realtime publication (`supabase_realtime` publication addition).
-- [x] Task 1.2: Export updated TypeScript database types in `packages/supabase/types/index.ts`.
+### Phase 1: Database Migration & Schema Types
+- [x] Task 1.1: Create SQL migration `packages/supabase/migrations/28_guest_chat_session_and_phone.sql`:
+  - `ALTER TABLE public.guest_conversations ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES public.guest_sessions(id) ON DELETE SET NULL;`
+  - `ALTER TABLE public.guest_conversations ADD COLUMN IF NOT EXISTS guest_phone TEXT;`
+  - `CREATE INDEX IF NOT EXISTS idx_guest_conversations_session_id ON public.guest_conversations(session_id);`
+  - `CREATE INDEX IF NOT EXISTS idx_guest_conversations_guest_phone ON public.guest_conversations(guest_phone);`
+- [x] Task 1.2: Update `packages/supabase/types/index.ts`:
+  - Add `session_id: string | null` and `guest_phone: string | null` to `GuestConversation`.
+  - Add relational `rooms?: { room_number: string } | null` typing.
+  - Update Database schema definition for `guest_conversations`.
 
-### Phase 2: AI Engine & Backend Endpoints
-- [x] Task 2.1: Build `apps/web/lib/ai-assistant.ts`:
-  - System prompt containing hotel identity, policies, dining hours, spa services, and standard concierge responses.
-  - Integration with Gemini 2.5/3.0 Flash via REST API with fallback to built-in hotel FAQ rules.
-  - Escalation intent classifier (detects requests for human staff, complaints, or custom booking needs).
-- [x] Task 2.2: Implement `apps/web/app/api/chat/send/route.ts`:
-  - Ingests messages, writes to `guest_chat_messages`, updates `guest_conversations`.
-  - If `status === 'BOT_ACTIVE'`, immediately runs AI Assistant and inserts AI response.
-  - If `status === 'STAFF_HANDOFF'`, dispatches FCM push notification via `sendWebPushToHotelStaff`.
-- [x] Task 2.3: Implement `apps/web/app/api/chat/ai-smart-replies/route.ts`:
-  - Accepts `conversation_id`, fetches last 6 messages, prompts Gemini for 3 short staff reply suggestions, and returns JSON array.
-- [x] Task 2.4: Implement `apps/web/app/api/chat/handoff/route.ts` & `/resolve/route.ts`.
-- [x] Task 2.5: Update `apps/web/lib/webPush.ts` to route `CHAT_HANDOFF` notifications to `FRONT_DESK` and `ADMIN`.
+### Phase 2: Guest Web Session Scoping & Phone Capture Prompt (`apps/web`)
+- [x] Task 2.1: Enhance `apps/web/app/app/stay/components/PhoneCaptureModal.tsx`:
+  - Add optional `title?: string` and `description?: string` props with sensible fallback defaults.
+  - Ensure `sessionStorage.setItem('hotel_guest_session_${roomId}', data.id)` is stored on successful session creation.
+- [x] Task 2.2: Update `apps/web/app/app/stay/components/GuestChatWidget.tsx`:
+  - Read `sessionId` from `sessionStorage.getItem('hotel_guest_session_${roomId}')`.
+  - Scope `loadConversation` query: `.eq('room_id', effectiveRoomId).eq('session_id', sessionId).neq('status', 'RESOLVED')`.
+  - On chat FAB press: verify `getStoredGuestPhone()`. If null, display `PhoneCaptureModal` with description: *"Please enter your mobile phone number in case the chat is disconnected or our staff needs to follow up."*
+  - On phone modal success: save phone, initialize conversation with `session_id`, and open drawer.
+  - On `handleSend()`: verify phone number is present; include `session_id` and `guest_phone` in the POST payload to `/api/chat/send`.
+- [x] Task 2.3: Update `apps/web/app/api/chat/send/route.ts`:
+  - Extract `session_id` and `guest_phone` from body.
+  - If `convId` is not provided, locate existing conversation matching `hotel_id`, `room_id`, AND `session_id` (`status != 'RESOLVED'`).
+  - When inserting new conversation, write `session_id` and `guest_phone`.
+  - If `guest_phone` is not passed, fetch latest phone from `guest_sessions` by `session_id` or `room_id`.
+  - Ensure conversation last message update keeps `guest_phone` and `session_id` intact.
+- [x] Task 2.4: Update `apps/web/app/api/chat/handoff/route.ts`:
+  - Include guest phone in push notification payload sent to Front Desk.
 
-### Phase 3: Guest Web Chat Widget (`apps/web`)
-- [x] Task 3.1: Create `apps/web/app/app/stay/components/GuestChatWidget.tsx`:
-  - Persistent bottom-right FAB with unread badge counter.
-  - Expandable glassmorphic chat container.
-  - Header with dynamic state: *"🤖 AI Concierge"* vs *"🧑💼 Front Desk Staff"*.
-  - Message bubble list with distinct Guest (Gold), AI (Dark), and Staff (Indigo) styling.
-  - Realtime typing indicator via Supabase broadcast.
-  - Quick action chips for common queries and *"Speak to Staff"* escalation button.
-- [x] Task 3.2: Wire `GuestChatWidget` into `StayRootClientWrapper.tsx` so all stay subroutes render the chat.
+### Phase 3: Staff App Room Number & Direct Calling (`apps/staff-app`)
+- [x] Task 3.1: Update `apps/staff-app/components/GuestChatModule.tsx`:
+  - Update query to `.select('*, rooms(room_number)')` with fallback query if join fails.
+  - Display actual room number: `Room ${conv.rooms?.room_number || 'Room'}` instead of `…${conv.room_id.slice(-4)}`.
+  - Render a clickable phone badge beside room title on conversation cards:
+    - If `conv.guest_phone` exists, display `📞 ${conv.guest_phone}` and trigger `Linking.openURL('tel:${conv.guest_phone}')`.
+    - If no phone exists, display `📱 No phone`.
+- [x] Task 3.2: Update `apps/staff-app/components/ActiveChatScreen.tsx`:
+  - Update `GuestConversation` interface with `session_id`, `guest_phone`, and `rooms?: { room_number: string } | null`.
+  - In header: render `💬 Room ${conversation.rooms?.room_number || 'Room'}`.
+  - Beside room title in header: render direct-dial button `📞 Call ${phone}` linking to device dialer with user-friendly alert on error.
+- [x] Task 3.3: Maintain Realtime synchronization on `guest_conversations` so room number and phone reflect instantly when a conversation is initiated.
 
-### Phase 4: Staff App Messaging Module (`apps/staff-app`)
-- [x] Task 4.1: Create `apps/staff-app/components/GuestChatModule.tsx`:
-  - Queue list with tabs: **Active Handoffs**, **AI Bot Managed**, and **Resolved**.
-  - Room cards with unread badges, booker/guest name, snippet, and elapsed timestamp.
-  - Supabase Realtime subscription on `guest_conversations`.
-- [x] Task 4.2: Create `apps/staff-app/components/ActiveChatScreen.tsx`:
-  - Full-screen staff chat view with real-time message stream.
-  - AI Smart Reply generator bar: 3 quick-reply chips that populate input on tap.
-  - **Claim Conversation** and **Mark Resolved** header actions.
-  - Realtime typing presence broadcaster.
-- [x] Task 4.3: Integrate `GuestChatModule` into `apps/staff-app/App.tsx`:
-  - Add Chat tab in staff navigation bar with live unread badge count.
-  - Wire push notification click routing to open active conversation directly.
-
-### Phase 5: Testing, Validation & Documentation
-- [x] Task 5.1: Run TypeScript type checks on both `apps/web` and `apps/staff-app`.
-- [x] Task 5.2: Verify bi-directional message delivery, AI responses, smart replies, and handoffs.
-- [x] Task 5.3: Document architectural decisions in `chat-history/` and update `README.md`.
+### Phase 4: Verification & Compiler Checks
+- [x] Task 4.1: Run TypeScript compiler check on `apps/web`:
+  `npx -p typescript tsc --noEmit -p apps/web/tsconfig.json`
+- [x] Task 4.2: Run TypeScript compiler check on `apps/staff-app`:
+  `npx -p typescript tsc --noEmit -p apps/staff-app/tsconfig.json`
+- [x] Task 4.3: Validate cross-device privacy and direct call flows.
 
 ---
 
 ## 4. Edge Cases & Safety Checks
 
-1. **AI Hallucination & Pricing Safety**:
-   - AI system prompt strictly instructs the bot to state exact policies from the hotel database and avoid guaranteeing unauthorized discounts or room upgrades without staff approval.
-2. **Escalation Loop Prevention**:
-   - When a guest clicks "Connect to Human Staff", conversation status immediately locks to `STAFF_HANDOFF` and AI auto-replies are disabled until staff resolves the conversation.
-3. **Offline & Realtime Channel Reconnect**:
-   - Realtime WebSocket listeners in both apps include auto-reconnect fallback polling (every 8s) to prevent missed messages if mobile connectivity drops.
-4. **Push Notification Deduplication**:
-   - Staff push notifications are throttled so staff devices aren't flooded with duplicate alerts for rapid guest messages within the same minute.
-5. **Database CHECK Constraints & Multi-Tenancy**:
-   - All queries and mutations strictly filter by `hotel_id` and `room_id`.
-   - Migration ensures strict `CHECK` constraints on `status` and `sender_type`.
+1. **Guest Session Lifecycle & Device Separation**:
+   - **Scenario**: Guest A checks out; Guest B checks in and scans QR code on their device.
+   - **Safety Guarantee**: Guest B's device generates or receives a fresh `guest_sessions` ID in `sessionStorage`. Because `GuestChatWidget` queries `eq('session_id', currentSessionId)`, Guest B sees a clean chat widget without Guest A's messages or phone number.
+2. **Same Guest Page Reload**:
+   - **Scenario**: Guest reloads the page or navigates between concierge subroutes (`/app/stay/spa`, `/app/stay/food`).
+   - **Safety Guarantee**: The `hotel_guest_session_${roomId}` and `hotel_guest_phone_number` persist in `sessionStorage` across same-tab navigations, allowing the guest to seamlessly resume their ongoing chat.
+3. **Devices Without Telephony Hardware (WiFi Tablets)**:
+   - **Safety Guarantee**: In `apps/staff-app`, `Linking.openURL('tel:${phone}')` is wrapped in `.catch()` with an `Alert.alert('Cannot Open Dialer', 'Unable to open the phone dialer on this device.')` to prevent crashes on non-phone tablet hardware.
+4. **Supabase Foreign Key Join Resilience**:
+   - **Safety Guarantee**: If RLS or schema cache temporarily fails on `rooms(room_number)`, `GuestChatModule` implements a fallback `.select('*')` query to prevent UI crashes.
 
 ---
 
 ## 5. Verification & Testing Steps
 
-1. **Database Migration Verification**:
-   - Run SQL script in Supabase SQL editor or local migration runner and verify table creation, indexes, and RLS policies.
-2. **Type Check Verification**:
-   ```bash
-   npx -p typescript tsc --noEmit -p apps/web/tsconfig.json
-   npx -p typescript tsc --noEmit -p apps/staff-app/tsconfig.json
-   ```
-3. **Guest AI Flow Test**:
-   - Open guest stay portal (`/app/stay?room=...&hash=...`), open chat widget, ask: *"What time is breakfast?"*
-   - Verify instant AI response formatted with bot badge.
-4. **Staff Escalation Flow Test**:
-   - In guest chat, tap *"Connect to Human Staff"*.
-   - Verify conversation status updates to `STAFF_HANDOFF`.
-   - Verify Android Staff App receives high-priority notification and conversation appears in **Active Handoffs** tab.
-5. **Staff Takeover & Smart Reply Test**:
-   - In Staff App, tap the active room conversation.
-   - Verify 3 AI Smart Reply chips appear below the message stream.
-   - Tap a smart reply chip $\rightarrow$ verify input is pre-filled $\rightarrow$ send message.
-   - Verify Guest Web instantly receives staff message in Indigo bubble with staff badge.
-6. **Resolution Flow Test**:
-   - In Staff App, tap **"Mark Resolved"**.
-   - Verify conversation moves to **Resolved** tab and guest widget resets to AI Assistant mode.
+### 1. Multi-Guest Chat Isolation Test:
+1. Open Incognito Window 1 at `/app/stay?room=<ROOM_ID>&hash=<HASH>`.
+2. Click chat FAB, input Phone `+63 917 111 2222`, send: *"Hello, I am Guest 1"*.
+3. Verify message is delivered and AI responds.
+4. Open Incognito Window 2 (simulating a new guest on another device) at the same room URL.
+5. Click chat FAB in Window 2.
+6. Verify Window 2 shows the PhoneCaptureModal and, upon entry, displays a **completely clean, empty chat history** (Guest 1's messages are not visible).
+
+### 2. Staff App Room Number & Direct Calling Test:
+1. Open `apps/staff-app`.
+2. Inspect the **Guest Chat** module list:
+   - Verify card displays **Room 302** (actual room number from `rooms` table, not UUID slice).
+   - Verify `📞 +63 917 111 2222` appears beside the room title.
+3. Tap the phone badge and confirm the native dialer opens.
+4. Tap the card to open `ActiveChatScreen`:
+   - Verify header shows `💬 Room 302`.
+   - Verify direct call button `📞 Call +63 917 111 2222` is visible and functional.
+
+### 3. Automated Type & Build Checks:
+```bash
+# Verify apps/web TypeScript
+npx -p typescript tsc --noEmit -p apps/web/tsconfig.json
+
+# Verify apps/staff-app TypeScript
+npx -p typescript tsc --noEmit -p apps/staff-app/tsconfig.json
+```

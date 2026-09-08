@@ -2,16 +2,17 @@
 
 import { useState } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
-import type { Database } from '@hotel-qr/supabase/types'
 
 const supabase = createSupabaseBrowserClient()
 
 interface PhoneCaptureModalProps {
   isOpen: boolean
   onClose: () => void
-  onSuccess: (phone: string) => void
+  onSuccess: (phone: string, sessionId?: string) => void
   roomId: string
   hotelId: string
+  title?: string
+  description?: string
 }
 
 export const GUEST_PHONE_STORAGE_KEY = 'hotel_guest_phone_number'
@@ -26,12 +27,24 @@ export function storeGuestPhone(phone: string): void {
   sessionStorage.setItem(GUEST_PHONE_STORAGE_KEY, phone)
 }
 
+export function getStoredGuestSessionId(roomId: string): string | null {
+  if (typeof window === 'undefined' || !roomId) return null
+  return sessionStorage.getItem(`hotel_guest_session_${roomId}`)
+}
+
+export function storeGuestSessionId(roomId: string, sessionId: string): void {
+  if (typeof window === 'undefined' || !roomId) return
+  sessionStorage.setItem(`hotel_guest_session_${roomId}`, sessionId)
+}
+
 export default function PhoneCaptureModal({
   isOpen,
   onClose,
   onSuccess,
   roomId,
   hotelId,
+  title = 'Contact Information',
+  description = 'Please enter your mobile phone number so our staff can notify you about your request status.',
 }: PhoneCaptureModalProps) {
   const [phoneNumber, setPhoneNumber] = useState('')
   const [saving, setSaving] = useState(false)
@@ -50,13 +63,15 @@ export default function PhoneCaptureModal({
     setSaving(true)
     setErrorMsg(null)
 
+    let createdSessionId: string | undefined = undefined
+
     try {
       // 1. Store in client sessionStorage
       storeGuestPhone(cleaned)
 
       // 2. Insert/Update guest_sessions in Supabase
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from('guest_sessions')
         .insert([
           {
@@ -67,16 +82,21 @@ export default function PhoneCaptureModal({
             expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           },
         ])
+        .select('id')
+        .single()
 
       if (error) {
         console.warn('Guest session insert notice:', error.message)
+      } else if (data?.id) {
+        createdSessionId = data.id
+        storeGuestSessionId(roomId, data.id)
       }
 
-      onSuccess(cleaned)
+      onSuccess(cleaned, createdSessionId)
     } catch (err) {
       console.error('Error saving phone session:', err)
       // Fallback: succeed anyway with sessionStorage
-      onSuccess(cleaned)
+      onSuccess(cleaned, createdSessionId)
     } finally {
       setSaving(false)
     }
@@ -97,9 +117,9 @@ export default function PhoneCaptureModal({
         </div>
 
         <div>
-          <h2 className="text-xl font-bold text-white">Contact Information</h2>
-          <p className="text-slate-400 text-xs mt-1">
-            Please enter your mobile phone number so our staff can notify you about your request status.
+          <h2 className="text-xl font-bold text-white">{title}</h2>
+          <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+            {description}
           </p>
         </div>
 
@@ -131,7 +151,7 @@ export default function PhoneCaptureModal({
               className="flex-[2] py-3 rounded-2xl font-bold text-sm text-white transition-all disabled:opacity-50"
               style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
             >
-              {saving ? 'Saving...' : 'Continue & Request'}
+              {saving ? 'Saving...' : 'Continue'}
             </button>
           </div>
         </form>

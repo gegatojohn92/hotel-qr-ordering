@@ -60,12 +60,19 @@ export async function POST(req: NextRequest) {
       .eq('id', room_id)
       .maybeSingle()
 
+    const { data: convData } = await supabase
+      .from('guest_conversations')
+      .select('guest_phone')
+      .eq('id', conversation_id)
+      .maybeSingle()
+
+    const phoneSuffix = convData?.guest_phone ? ` · 📞 ${convData.guest_phone}` : ''
     const pushBody = guest_message
-      ? `"${String(guest_message).slice(0, 80)}"`
-      : `A guest in Room ${roomData?.room_number || '?'} needs your assistance.`
+      ? `"${String(guest_message).slice(0, 80)}"${convData?.guest_phone ? ` (Phone: ${convData.guest_phone})` : ''}`
+      : `A guest in Room ${roomData?.room_number || '?'} needs your assistance.${convData?.guest_phone ? ` (Phone: ${convData.guest_phone})` : ''}`
 
     await sendWebPushToHotelStaff(hotel_id, {
-      title: `🙋 Guest Handoff – Room ${roomData?.room_number || '?'}`,
+      title: `🙋 Guest Handoff – Room ${roomData?.room_number || '?'}${phoneSuffix}`,
       body: pushBody,
       requestType: 'CHAT_HANDOFF',
       roomNumber: roomData?.room_number,

@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Linking,
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -20,6 +21,8 @@ export interface GuestConversation {
   id: string
   hotel_id: string
   room_id: string
+  session_id?: string | null
+  guest_phone?: string | null
   guest_name: string | null
   status: ConversationStatus
   assigned_staff_id: string | null
@@ -30,6 +33,7 @@ export interface GuestConversation {
   unread_guest_count: number
   created_at: string
   updated_at: string
+  rooms?: { room_number: string } | null
 }
 
 export interface GuestChatMessage {
@@ -140,6 +144,7 @@ export default function ActiveChatScreen({
   onBack,
   onResolved,
 }: ActiveChatScreenProps) {
+  const [currentConv, setCurrentConv] = useState<GuestConversation>(conversation)
   const [messages, setMessages] = useState<OptimisticMessage[]>([])
   const [inputText, setInputText] = useState('')
   const [isSending, setIsSending] = useState(false)
@@ -151,7 +156,70 @@ export default function ActiveChatScreen({
   const channelRef = useRef<RealtimeChannel | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
-  const isHandoff = conversation.status === 'STAFF_HANDOFF'
+  useEffect(() => {
+    setCurrentConv(conversation)
+  }, [conversation])
+
+  // Resolve room number & phone if not already present
+  useEffect(() => {
+    if (!currentConv.rooms?.room_number && currentConv.room_id) {
+      (supabase as any)
+        .from('rooms')
+        .select('room_number')
+        .eq('id', currentConv.room_id)
+        .maybeSingle()
+        .then(({ data }: { data: { room_number: string } | null }) => {
+          if (data?.room_number) {
+            setCurrentConv((prev) => ({ ...prev, rooms: { room_number: data.room_number } }))
+          }
+        })
+    }
+    if (!currentConv.guest_phone && currentConv.id) {
+      (supabase as any)
+        .from('guest_conversations')
+        .select('guest_phone')
+        .eq('id', currentConv.id)
+        .maybeSingle()
+        .then(({ data }: { data: { guest_phone: string } | null }) => {
+          if (data?.guest_phone) {
+            setCurrentConv((prev) => ({ ...prev, guest_phone: data.guest_phone }))
+          }
+        })
+    }
+  }, [currentConv.id, currentConv.room_id, currentConv.rooms?.room_number, currentConv.guest_phone])
+
+  // Realtime conversation update (status, phone, assigned staff)
+  useEffect(() => {
+    const convCh = supabase
+      .channel(`staff-conv-details-${conversation.id}`)
+      .on('postgres_changes' as any, {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'guest_conversations',
+        filter: `id=eq.${conversation.id}`,
+      }, (payload: { new: Partial<GuestConversation> }) => {
+        if (payload?.new) {
+          setCurrentConv((prev) => ({ ...prev, ...payload.new }))
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(convCh)
+    }
+  }, [conversation.id])
+
+  const isHandoff = currentConv.status === 'STAFF_HANDOFF'
+
+  const handleCallGuest = useCallback(() => {
+    if (!currentConv.guest_phone) {
+      Alert.alert('No Phone Number', 'This guest chat does not have a contact phone number on file.')
+      return
+    }
+    Linking.openURL(`tel:${currentConv.guest_phone}`).catch(() =>
+      Alert.alert('Cannot Open Dialer', 'Unable to open the phone dialer on this device.')
+    )
+  }, [currentConv.guest_phone])
 
   // ── Load messages ──────────────────────────────────────────────────────────
   const loadMessages = useCallback(async () => {
@@ -355,8 +423,11 @@ export default function ActiveChatScreen({
     }
   }, [inputText, isSending, conversation, hotelId, staffUserId, staffName, isHandoff, loadSmartReplies])
 
-  const statusColor = isHandoff ? '#6366f1' : conversation.status === 'RESOLVED' ? '#4ade80' : '#fbbf24'
-  const statusLabel = isHandoff ? '🧑‍💼 Staff Active' : conversation.status === 'RESOLVED' ? '✅ Resolved' : '🤖 AI Bot'
+  const roomNumber = currentConv.rooms?.room_number || (currentConv.room_id ? `…${currentConv.room_id.slice(-4).toUpperCase()}` : 'Room')
+  const guestPhone = currentConv.guest_phone
+
+  const statusColor = isHandoff ? '#6366f1' : currentConv.status === 'RESOLVED' ? '#4ade80' : '#fbbf24'
+  const statusLabel = isHandoff ? '🧑‍💼 Staff Active' : currentConv.status === 'RESOLVED' ? '✅ Resolved' : '🤖 AI Bot'
 
   return (
     <View style={chatStyles.container}>
@@ -366,12 +437,23 @@ export default function ActiveChatScreen({
           <Text style={chatStyles.backText}>← Back</Text>
         </TouchableOpacity>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={chatStyles.headerTitle} numberOfLines={1}>
-            💬 Room …{conversation.room_id?.slice(-4).toUpperCase()}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Text style={chatStyles.headerTitle} numberOfLines={1}>
+              💬 Room {roomNumber}
+            </Text>
+            {guestPhone ? (
+              <TouchableOpacity
+                style={chatStyles.phoneCallBtn}
+                onPress={handleCallGuest}
+                activeOpacity={0.7}
+              >
+                <Text style={chatStyles.phoneCallBtnText}>📞 {guestPhone}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <Text style={[chatStyles.headerStatus, { color: statusColor }]}>{statusLabel}</Text>
         </View>
-        {conversation.status === 'BOT_ACTIVE' && (
+        {currentConv.status === 'BOT_ACTIVE' && (
           <TouchableOpacity
             style={[chatStyles.actionBtn, { backgroundColor: 'rgba(99,102,241,0.2)', borderColor: '#6366f1' }]}
             onPress={handleClaim}
@@ -574,4 +656,19 @@ const chatStyles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: '#172033' },
   sendBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  phoneCallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.45)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  phoneCallBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#34d399',
+  },
 })

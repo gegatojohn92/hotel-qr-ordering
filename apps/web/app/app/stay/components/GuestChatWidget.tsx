@@ -17,6 +17,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import type { GuestChatMessage, GuestConversation } from '@hotel-qr/supabase/types'
+import PhoneCaptureModal, {
+  getStoredGuestPhone,
+  getStoredGuestSessionId,
+  storeGuestSessionId,
+} from './PhoneCaptureModal'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -119,6 +124,7 @@ export default function GuestChatWidget() {
   const [effectiveRoomId, setEffectiveRoomId] = useState<string | null>(roomId)
   const [isEscalating, setIsEscalating] = useState(false)
   const [showEscalateConfirm, setShowEscalateConfirm] = useState(false)
+  const [showPhoneModal, setShowPhoneModal] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -127,6 +133,29 @@ export default function GuestChatWidget() {
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const supabase = createSupabaseBrowserClient()
+
+  // ── Handle Chat Drawer Toggle with Phone Gate ────────────────────────────
+  const handleToggleChat = () => {
+    if (isOpen) {
+      setIsOpen(false)
+      return
+    }
+    const phone = getStoredGuestPhone()
+    if (!phone) {
+      setShowPhoneModal(true)
+    } else {
+      setIsOpen(true)
+    }
+  }
+
+  const handlePhoneSuccess = (phone: string, newSessionId?: string) => {
+    setShowPhoneModal(false)
+    if (newSessionId && effectiveRoomId) {
+      storeGuestSessionId(effectiveRoomId, newSessionId)
+    }
+    setIsOpen(true)
+    loadConversation()
+  }
 
   // ── Resolve room/hotel if missing ────────────────────────────────────────
   useEffect(() => {
@@ -162,12 +191,14 @@ export default function GuestChatWidget() {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 150)
   }, [isOpen])
 
-  // ── Load existing conversation ───────────────────────────────────────────
+  // ── Load existing conversation scoped to active guest session ────────────
   const loadConversation = useCallback(async () => {
     if (!effectiveRoomId || !hotelIdResolved) return
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: conv } = await (supabase as any)
+    const activeSessionId = getStoredGuestSessionId(effectiveRoomId)
+
+    // Scope query by session_id if available to prevent history leaks between guests
+    let query = (supabase as any)
       .from('guest_conversations')
       .select('*')
       .eq('room_id', effectiveRoomId)
@@ -175,7 +206,12 @@ export default function GuestChatWidget() {
       .neq('status', 'RESOLVED')
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
+
+    if (activeSessionId) {
+      query = query.eq('session_id', activeSessionId)
+    }
+
+    const { data: conv } = await query.maybeSingle()
 
     if (conv) {
       setConversation(conv)
@@ -285,6 +321,14 @@ export default function GuestChatWidget() {
       if (!msgText || isSending || !effectiveRoomId) return
       if (!hotelIdResolved) return
 
+      const phone = getStoredGuestPhone()
+      if (!phone) {
+        setShowPhoneModal(true)
+        return
+      }
+
+      const activeSessionId = getStoredGuestSessionId(effectiveRoomId)
+
       setInputText('')
       setIsSending(true)
 
@@ -317,6 +361,8 @@ export default function GuestChatWidget() {
             conversation_id: conversation?.id || null,
             hotel_id: hotelIdResolved,
             room_id: effectiveRoomId,
+            session_id: activeSessionId || null,
+            guest_phone: phone || null,
             message_text: msgText,
             sender_name: 'Guest',
           }),
@@ -424,7 +470,7 @@ export default function GuestChatWidget() {
         <button
           id="guest-chat-fab"
           aria-label="Open Chat"
-          onClick={() => setIsOpen((v) => !v)}
+          onClick={handleToggleChat}
           style={{
             position: 'relative',
             width: '56px',
@@ -888,6 +934,17 @@ export default function GuestChatWidget() {
           )}
         </div>
       )}
+
+      {/* ── Phone Capture Modal for Chat Reachability ──────────────────── */}
+      <PhoneCaptureModal
+        isOpen={showPhoneModal}
+        onClose={() => setShowPhoneModal(false)}
+        onSuccess={handlePhoneSuccess}
+        roomId={effectiveRoomId || ''}
+        hotelId={hotelIdResolved}
+        title="Contact Information"
+        description="Please enter your mobile phone number in case the chat is disconnected or our staff needs to follow up on your request."
+      />
 
       {/* ── CSS Animations ───────────────────────────────────────────────── */}
       <style>{`

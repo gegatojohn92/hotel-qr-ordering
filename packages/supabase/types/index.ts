@@ -331,6 +331,8 @@ export interface GuestConversation {
   id: string
   hotel_id: string
   room_id: string
+  session_id?: string | null
+  guest_phone?: string | null
   status: GuestConversationStatus
   assigned_staff_id: string | null
   guest_name: string | null
@@ -341,6 +343,7 @@ export interface GuestConversation {
   last_message_at: string
   created_at: string
   updated_at: string
+  rooms?: { room_number: string } | null
 }
 
 export interface GuestChatMessage {
