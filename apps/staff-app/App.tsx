@@ -14,6 +14,7 @@ import {
   TextInput,
   Platform,
   Linking,
+  Modal,
 } from 'react-native'
 import { supabase } from './lib/supabase'
 import CallQueue from './components/CallQueue'
@@ -23,6 +24,7 @@ import FoodQueue from './components/FoodQueue'
 import TaskQueue from './components/TaskQueue'
 import FunctionRoomModule from './components/FunctionRoomModule'
 import GuestChatModule from './components/GuestChatModule'
+import NotificationSettingsScreen from './screens/NotificationSettingsScreen'
 import { StaffUser } from './components/UserManagement'
 import DedicatedCallModule from './components/DedicatedCallModule'
 import RequestHistory from './components/RequestHistory'
@@ -901,6 +903,7 @@ function MainAppContent() {
   const [pushToken, setPushToken] = useState<string | null>(null)
   const [pushLogs, setPushLogs] = useState<PushLogItem[]>([])
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false)
+  const [showNotifSettings, setShowNotifSettings] = useState(false)
 
   const handleTriggerTestAlarm = useCallback(() => {
     triggerAlarmNotification({
@@ -1429,6 +1432,13 @@ function MainAppContent() {
                 </TouchableOpacity>
               )}
               <TouchableOpacity
+                onPress={() => setShowNotifSettings(true)}
+                style={styles.notifSettingsButton}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.notifSettingsButtonText}>🔔 Alerts</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 onPress={handleManualSync}
                 style={[styles.syncButton, isManualSyncing && styles.syncButtonActive]}
                 activeOpacity={0.8}
@@ -1639,6 +1649,21 @@ function MainAppContent() {
         }}
       />
 
+      {/* 🔔 Staff Notification Preferences Modal */}
+      <Modal
+        visible={showNotifSettings}
+        animationType="slide"
+        onRequestClose={() => setShowNotifSettings(false)}
+      >
+        {activeStaffUser && (
+          <NotificationSettingsScreen
+            staffUserId={activeStaffUser.id}
+            staffName={activeStaffUser.name || 'Staff'}
+            onBack={() => setShowNotifSettings(false)}
+          />
+        )}
+      </Modal>
+
     </SafeAreaView>
   )
 }
@@ -1820,6 +1845,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.2,
+  },
+  notifSettingsButton: {
+    backgroundColor: 'rgba(99,102,241,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.4)',
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifSettingsButtonText: {
+    color: '#a5b4fc',
+    fontSize: 13,
+    fontWeight: '700',
   },
   syncButton: {
     backgroundColor: 'rgba(251,191,36,0.14)',

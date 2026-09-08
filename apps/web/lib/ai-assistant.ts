@@ -164,7 +164,7 @@ const FALLBACK_RULES: FallbackRule[] = [
   {
     patterns: [/gym|fitness|exercise|workout|treadmill|weights/i],
     response: () =>
-      `💪 Our **Fitness Center / Gym** is open daily from **6:00 AM to 10:00 PM** for all registered hotel guests. It is equipped with cardio machines, free weights, and stretching areas. Is there anything else you need?`,
+      `💪 Our **Fitness Center / Gym** is open daily from **6:00 AM to 10:00 PM** for all registered hotel guests. It is equipped with cardio machines, treadmill, stationary bike, free weights, and stretching areas. Is there anything else you need?`,
   },
 
   // 5. Housekeeping, Cleaning & Make Up Room

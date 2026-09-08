@@ -160,6 +160,11 @@ export interface StaffUser {
   is_active: boolean
   created_at: string
   updated_at?: string
+  // Per-staff notification preferences (Migration 29)
+  mute_guest_chat_push?: boolean
+  suppress_push_when_active?: boolean
+  quiet_hours_from_override?: number | null
+  quiet_hours_to_override?: number | null
 }
 
 export interface MenuCategory {
@@ -274,6 +279,12 @@ export interface NotificationSettings {
   notify_days_before?: number
   enable_guest_live_call?: boolean
   updated_at: string
+  // Hotel-level push suppression behaviour (Migration 29)
+  suppress_if_active?: boolean
+  push_cooldown_seconds?: number
+  quiet_hours_enabled?: boolean
+  quiet_hours_from?: number
+  quiet_hours_to?: number
 }
 
 export interface FunctionRoom {
@@ -343,6 +354,8 @@ export interface GuestConversation {
   last_message_at: string
   created_at: string
   updated_at: string
+  // Push cooldown tracking (Migration 29)
+  last_push_sent_at?: string | null
   rooms?: { room_number: string } | null
 }
 
@@ -357,6 +370,19 @@ export interface GuestChatMessage {
   message_text: string
   is_read: boolean
   created_at: string
+}
+
+// ── Staff Presence (Migration 29) ─────────────────────────────
+// Tracks which staff member is actively viewing a conversation.
+// Used by webPush.ts to suppress redundant FCM pushes.
+export interface StaffPresence {
+  id: string
+  staff_user_id: string
+  hotel_id: string
+  is_active_in_conversation: boolean
+  active_conversation_id: string | null
+  last_seen_at: string
+  updated_at: string
 }
 
 export interface BookingFormInputs {
@@ -556,6 +582,11 @@ export interface Database {
         Row: GuestChatMessage
         Insert: Omit<GuestChatMessage, 'id' | 'created_at'> & { id?: string; created_at?: string }
         Update: Partial<Omit<GuestChatMessage, 'id'>>
+      }
+      staff_presence: {
+        Row: StaffPresence
+        Insert: Omit<StaffPresence, 'id'> & { id?: string }
+        Update: Partial<Omit<StaffPresence, 'id'>>
       }
     }
     Views: Record<string, never>

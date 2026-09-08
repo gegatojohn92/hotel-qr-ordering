@@ -13,6 +13,7 @@ import {
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import { useStaffPresence } from '../hooks/useStaffPresence'
 
 export type GuestChatSenderType = 'GUEST' | 'AI' | 'STAFF' | 'SYSTEM'
 export type ConversationStatus = 'BOT_ACTIVE' | 'STAFF_HANDOFF' | 'RESOLVED'
@@ -189,6 +190,11 @@ export default function ActiveChatScreen({
   const scrollRef = useRef<ScrollView>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
+
+  // ── Staff Presence: suppress FCM while actively viewing this conversation ──
+  // The server-side webPush.ts checks staff_presence before dispatching FCM.
+  // If this staff member is active here, routine GUEST_CHAT pushes are held.
+  useStaffPresence(staffUserId, currentConv.id)
 
   useEffect(() => {
     setCurrentConv(conversation)

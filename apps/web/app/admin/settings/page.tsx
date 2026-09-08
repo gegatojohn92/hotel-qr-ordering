@@ -39,6 +39,13 @@ export default function HotelSettingsPage() {
   const [functionRoomLeadDays, setFunctionRoomLeadDays] = useState<number>(1)
   const [guestLiveCallEnabled, setGuestLiveCallEnabled] = useState<boolean>(true)
 
+  // Push Notification Behaviour & Suppression Settings
+  const [suppressIfActive, setSuppressIfActive]         = useState<boolean>(true)
+  const [pushCooldownSeconds, setPushCooldownSeconds]   = useState<number>(30)
+  const [quietHoursEnabled, setQuietHoursEnabled]       = useState<boolean>(false)
+  const [quietHoursFrom, setQuietHoursFrom]             = useState<number>(22)
+  const [quietHoursTo, setQuietHoursTo]                 = useState<number>(7)
+
   // Test Push State
   const [testPushLoading, setTestPushLoading] = useState(false)
   const [testPushResult, setTestPushResult] = useState<{ success?: boolean; message?: string } | null>(null)
@@ -93,6 +100,11 @@ export default function HotelSettingsPage() {
           if (typeof nData.notify_same_day === 'boolean') setFunctionRoomNotificationEnabled(nData.notify_same_day)
           if (typeof nData.notify_days_before === 'number') setFunctionRoomLeadDays(nData.notify_days_before)
           if (typeof nData.enable_guest_live_call === 'boolean') setGuestLiveCallEnabled(nData.enable_guest_live_call)
+          if (typeof nData.suppress_if_active === 'boolean') setSuppressIfActive(nData.suppress_if_active)
+          if (typeof nData.push_cooldown_seconds === 'number') setPushCooldownSeconds(nData.push_cooldown_seconds)
+          if (typeof nData.quiet_hours_enabled === 'boolean') setQuietHoursEnabled(nData.quiet_hours_enabled)
+          if (typeof nData.quiet_hours_from === 'number') setQuietHoursFrom(nData.quiet_hours_from)
+          if (typeof nData.quiet_hours_to === 'number') setQuietHoursTo(nData.quiet_hours_to)
         }
       } catch (err) {
         console.error('Error loading hotel data:', err)
@@ -143,6 +155,11 @@ export default function HotelSettingsPage() {
           notify_same_day: functionRoomNotificationEnabled,
           notify_days_before: functionRoomLeadDays,
           enable_guest_live_call: guestLiveCallEnabled,
+          suppress_if_active: suppressIfActive,
+          push_cooldown_seconds: pushCooldownSeconds,
+          quiet_hours_enabled: quietHoursEnabled,
+          quiet_hours_from: quietHoursFrom,
+          quiet_hours_to: quietHoursTo,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'hotel_id' })
 
@@ -992,7 +1009,183 @@ export default function HotelSettingsPage() {
                   </div>
                 </div>
 
-                {/* 4. Instant Test Push Dispatcher */}
+                {/* 4. Push Notification Behaviour & Smart Suppression */}
+                <div style={{ background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 14, padding: '14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      🔕 Smart Push Suppression & Cooldown
+                    </div>
+                    <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: 11 }}>
+                      Intelligently hold back FCM push notifications when staff are already engaged to prevent disruptive notification fatigue.
+                    </p>
+                  </div>
+
+                  {/* Smart Suppression Toggle */}
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>👁️</span> Suppress Push If Staff Is Actively Viewing That Chat
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                        If a staff member is actively reading or typing in a conversation inside the Android app, skip sending them FCM pushes for that specific room.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      id="toggle-suppress-if-active"
+                      onClick={() => setSuppressIfActive(v => !v)}
+                      style={{
+                        position: 'relative',
+                        width: 48,
+                        height: 26,
+                        borderRadius: 13,
+                        border: 'none',
+                        background: suppressIfActive ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(255,255,255,0.1)',
+                        cursor: 'pointer',
+                        transition: 'background 0.25s',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{
+                        position: 'absolute',
+                        top: 3,
+                        left: suppressIfActive ? 25 : 3,
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.25s',
+                        boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                      }} />
+                    </button>
+                  </div>
+
+                  {/* Cooldown Slider */}
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>⏱️</span> Push Cooldown Between Messages
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          Minimum seconds between pushes for standard guest chat (urgent escalations always bypass cooldown).
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: '#6366f1' }}>
+                        {pushCooldownSeconds === 0 ? 'No cooldown' : `${pushCooldownSeconds}s`}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={180}
+                      step={10}
+                      value={pushCooldownSeconds}
+                      onChange={(e) => setPushCooldownSeconds(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: '#6366f1', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: 10, marginTop: 4 }}>
+                      <span>0s (Every message)</span>
+                      <span>30s (Default)</span>
+                      <span>60s</span>
+                      <span>180s (Max)</span>
+                    </div>
+                  </div>
+
+                  {/* Quiet Hours */}
+                  <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>🌙</span> Hotel-Wide Quiet Hours
+                        </div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          Suppress non-urgent guest chat pushes during overnight hours (Manila Time).
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        id="toggle-quiet-hours"
+                        onClick={() => setQuietHoursEnabled(v => !v)}
+                        style={{
+                          position: 'relative',
+                          width: 48,
+                          height: 26,
+                          borderRadius: 13,
+                          border: 'none',
+                          background: quietHoursEnabled ? 'linear-gradient(135deg, #a78bfa, #7c3aed)' : 'rgba(255,255,255,0.1)',
+                          cursor: 'pointer',
+                          transition: 'background 0.25s',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span style={{
+                          position: 'absolute',
+                          top: 3,
+                          left: quietHoursEnabled ? 25 : 3,
+                          width: 20,
+                          height: 20,
+                          borderRadius: '50%',
+                          background: '#fff',
+                          transition: 'left 0.25s',
+                          boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                        }} />
+                      </button>
+                    </div>
+
+                    {quietHoursEnabled && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>From:</span>
+                          <select
+                            value={quietHoursFrom}
+                            onChange={(e) => setQuietHoursFrom(Number(e.target.value))}
+                            style={{
+                              background: '#0f172a',
+                              border: '1px solid #334155',
+                              borderRadius: 8,
+                              padding: '6px 10px',
+                              color: '#fff',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {Array.from({ length: 24 }, (_, i) => (
+                              <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>To:</span>
+                          <select
+                            value={quietHoursTo}
+                            onChange={(e) => setQuietHoursTo(Number(e.target.value))}
+                            style={{
+                              background: '#0f172a',
+                              border: '1px solid #334155',
+                              borderRadius: 8,
+                              padding: '6px 10px',
+                              color: '#fff',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {Array.from({ length: 24 }, (_, i) => (
+                              <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                            ))}
+                          </select>
+                        </div>
+                        <span style={{ fontSize: 11, color: '#a78bfa' }}>
+                          (Non-urgent pushes paused between {String(quietHoursFrom).padStart(2, '0')}:00 and {String(quietHoursTo).padStart(2, '0')}:00)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 5. Instant Test Push Dispatcher */}
                 <div style={{ background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.25)', borderRadius: 14, padding: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#a5b4fc', marginBottom: 2 }}>
