@@ -197,7 +197,6 @@ export async function POST(req: NextRequest) {
         .eq('id', convId)
 
       if (richErr) {
-        // Fall back to baseline update if extra columns don't exist
         await supabase
           .from('guest_conversations')
           .update(baselineUpdate)
@@ -215,8 +214,20 @@ export async function POST(req: NextRequest) {
     // ── 5. AI Auto-Reply (if BOT_ACTIVE) ───────────────────────────────────
     let aiMessage: { id: string; message_text: string; created_at: string } | null = null
 
+    // Resolve room number once — shared by push dispatch and AI context below
+    let roomNumber: string | undefined = undefined
+    try {
+      const { data: roomRecord } = await supabase
+        .from('rooms')
+        .select('room_number')
+        .eq('id', room_id)
+        .maybeSingle()
+      if (roomRecord?.room_number) {
+        roomNumber = String(roomRecord.room_number)
+      }
+    } catch {}
+
     if (conv.status === 'BOT_ACTIVE') {
-      // Fetch recent history for context
       const { data: recentMsgs } = await supabase
         .from('guest_chat_messages')
         .select('sender_type, message_text')
@@ -230,21 +241,6 @@ export async function POST(req: NextRequest) {
           role: m.sender_type === 'GUEST' ? ('user' as const) : ('model' as const),
           text: m.message_text,
         }))
-
-      // Resolve room number and live time context for rich AI answers
-      let roomNumber: string | undefined = undefined
-      try {
-        const { data: roomRecord } = await supabase
-          .from('rooms')
-          .select('room_number')
-          .eq('id', room_id)
-          .maybeSingle()
-        if (roomRecord?.room_number) {
-          roomNumber = String(roomRecord.room_number)
-        }
-      } catch {
-        // non-blocking
-      }
 
       const now = new Date()
       const localTime = now.toLocaleString('en-US', {
@@ -271,7 +267,6 @@ export async function POST(req: NextRequest) {
         hour24: isNaN(manilaHour) ? undefined : manilaHour,
       })
 
-      // Insert AI response
       const { data: aiMsg } = await supabase
         .from('guest_chat_messages')
         .insert({
@@ -288,7 +283,6 @@ export async function POST(req: NextRequest) {
 
       if (aiMsg) aiMessage = aiMsg
 
-      // Update conversation unread for guest
       const { data: convAfterAi } = await supabase
         .from('guest_conversations')
         .select('unread_guest_count')
@@ -306,44 +300,39 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', convId)
 
-      // Escalate if needed
+      const phoneInfo = effectivePhoneForPush ? ` · 📞 ${effectivePhoneForPush}` : ''
+
       if (aiResponse.shouldEscalate) {
         await supabase
           .from('guest_conversations')
           .update({ status: 'STAFF_HANDOFF', updated_at: new Date().toISOString() })
           .eq('id', convId)
 
-        // Dispatch push notification
-        const { data: roomData } = await supabase
-          .from('rooms')
-          .select('room_number')
-          .eq('id', room_id)
-          .maybeSingle()
-
-        const phoneInfo = effectivePhoneForPush ? ` · 📞 ${effectivePhoneForPush}` : ''
         await sendWebPushToHotelStaff(hotel_id, {
-          title: `💬 Guest Chat – Room ${roomData?.room_number || '?'}${phoneInfo}`,
+          title: `🚨 Guest Needs Help – Room ${roomNumber || '?'}${phoneInfo}`,
           body: `A guest needs staff assistance: "${message_text.slice(0, 80)}"`,
           requestType: 'CHAT_HANDOFF',
-          roomNumber: roomData?.room_number,
+          roomNumber,
           url: '/staff/chat',
           tag: `chat-handoff-${convId}`,
         })
+      } else {
+        await sendWebPushToHotelStaff(hotel_id, {
+          title: `🤖 Guest Chat – Room ${roomNumber || '?'}${phoneInfo}`,
+          body: message_text.slice(0, 100),
+          requestType: 'GUEST_CHAT',
+          roomNumber,
+          url: '/staff/chat',
+          tag: `guest-chat-${convId}`,
+        })
       }
     } else if (conv.status === 'STAFF_HANDOFF') {
-      // Notify staff of new guest message
-      const { data: roomData } = await supabase
-        .from('rooms')
-        .select('room_number')
-        .eq('id', room_id)
-        .maybeSingle()
-
       const phoneInfo = effectivePhoneForPush ? ` · 📞 ${effectivePhoneForPush}` : ''
       await sendWebPushToHotelStaff(hotel_id, {
-        title: `💬 Guest Message – Room ${roomData?.room_number || '?'}${phoneInfo}`,
+        title: `💬 Guest Reply – Room ${roomNumber || '?'}${phoneInfo}`,
         body: message_text.slice(0, 100),
         requestType: 'GUEST_CHAT',
-        roomNumber: roomData?.room_number,
+        roomNumber,
         url: '/staff/chat',
         tag: `guest-chat-${convId}`,
       })

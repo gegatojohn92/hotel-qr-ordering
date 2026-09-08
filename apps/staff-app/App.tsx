@@ -973,6 +973,14 @@ function MainAppContent() {
 
       if (data?.requestType === 'CHAT_HANDOFF' || data?.requestType === 'GUEST_CHAT' || data?.conversationId) {
         setRefreshKey((k) => k + 1)
+        // Fire an audible alarm so staff are actually notified of the guest chat
+        triggerAlarmNotification({
+          title: data?.requestType === 'CHAT_HANDOFF' ? '🚨 Guest Needs Help' : '💬 Guest Message',
+          body: data?.body || (data?.roomNumber ? `Room ${data.roomNumber} sent a message` : 'A guest sent a message'),
+          requestId: data?.requestId || `chat-${Date.now()}`,
+          roomNumber: data?.roomNumber || '?',
+          requestType: data?.requestType || 'GUEST_CHAT',
+        }).catch(() => {/* non-fatal */})
         return
       }
 
@@ -1029,6 +1037,11 @@ function MainAppContent() {
           `Your Android device received the FCM High-Priority push test at ${new Date().toLocaleTimeString()}!`,
           [{ text: 'Great!' }]
         )
+      }
+
+      if (data?.requestType === 'CHAT_HANDOFF' || data?.requestType === 'GUEST_CHAT') {
+        setRefreshKey((k) => k + 1)
+        return
       }
 
       if (data?.requestId && !isTest) {
