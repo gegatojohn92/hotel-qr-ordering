@@ -1542,7 +1542,13 @@ function MainAppContent() {
             {/* 4. Function Room Booking & Schedule Module */}
             <FunctionRoomModule activeStaffUser={activeStaffUser} />
 
-            {/* 5. Guest Chat Module (Real-time AI + Staff Handoff) */}
+            {/* 5. Food Orders Queue (Always visible to Kitchen, Admin, Front Desk) */}
+            <FoodQueue activeStaffId={activeStaffUser?.id} activeStaffUser={activeStaffUser} refreshTrigger={refreshKey} />
+
+            {/* 6. All Request History Logs */}
+            <RequestHistory refreshTrigger={refreshKey} />
+
+            {/* 7. Guest Chat Module (Real-time AI + Staff Handoff) — placed last to reduce UI crowding */}
             {activeStaffUser?.role !== 'KITCHEN' && (
               <GuestChatModule
                 activeStaffUser={activeStaffUser}
@@ -1550,12 +1556,6 @@ function MainAppContent() {
                 webAppBaseUrl={WEB_APP_BASE_URL}
               />
             )}
-
-            {/* 6. Food Orders Queue (Always visible to Kitchen, Admin, Front Desk) */}
-            <FoodQueue activeStaffId={activeStaffUser?.id} activeStaffUser={activeStaffUser} refreshTrigger={refreshKey} />
-
-            {/* 7. All Request History Logs */}
-            <RequestHistory refreshTrigger={refreshKey} />
 
           </Animated.View>
         )}

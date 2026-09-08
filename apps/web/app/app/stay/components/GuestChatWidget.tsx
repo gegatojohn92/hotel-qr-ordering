@@ -220,8 +220,11 @@ export default function GuestChatWidget() {
       }
     }
 
-    // 2. If no scoped conversation found, fall back to room-level active conversation
-    if (!conv) {
+    // 2. If no scoped conversation found AND there's no active session ID,
+    //    fall back to room-level active conversation (legacy / no-session path).
+    //    When a session ID IS present but returned no match, we intentionally
+    //    return empty so the backend creates a fresh conversation for this guest.
+    if (!conv && !activeSessionId) {
       try {
         const { data: roomConv } = await (supabase as any)
           .from('guest_conversations')

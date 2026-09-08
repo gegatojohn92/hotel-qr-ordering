@@ -51,7 +51,10 @@ export async function POST(req: NextRequest) {
       }
 
       // 1b. Fallback: find any active conversation for this room
-      if (!convId) {
+      //     ONLY when no session_id is present. When session_id is provided but
+      //     returned no match in Step 1a, always create a fresh conversation so
+      //     the new guest's chat is fully isolated from prior sessions.
+      if (!convId && !session_id) {
         const { data: existing } = await supabase
           .from('guest_conversations')
           .select('id, status')

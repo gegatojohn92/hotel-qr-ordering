@@ -95,7 +95,17 @@ export default function PhoneCaptureModal({
       onSuccess(cleaned, createdSessionId)
     } catch (err) {
       console.error('Error saving phone session:', err)
-      // Fallback: succeed anyway with sessionStorage
+      // Fallback: always ensure a session ID exists client-side
+      if (!createdSessionId) {
+        try {
+          createdSessionId = crypto.randomUUID()
+          storeGuestSessionId(roomId, createdSessionId)
+        } catch {
+          // crypto.randomUUID not available (very old browser) — use timestamp fallback
+          createdSessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+          storeGuestSessionId(roomId, createdSessionId)
+        }
+      }
       onSuccess(cleaned, createdSessionId)
     } finally {
       setSaving(false)
