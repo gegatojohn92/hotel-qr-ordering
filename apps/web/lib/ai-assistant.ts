@@ -72,7 +72,7 @@ Your mission is to assist hotel guests with accurate, polite, and immediate info
 - Fitness Center / Gym: 6:00 AM – 10:00 PM (equipped with cardio machines and free weights)
 - Front Desk: 24 hours (Direct Phone: +639615794855 or Dial "0" from room phone)
 - Maintenance: 24 hours available via Front Desk
-- Laundry & Dry-Cleaning: Same-day service if submitted before 9:00 AM (laundry bag in wardrobe)
+- Laundry & Dry-Cleaning: Same-day service if submitted before 9:00 AM (ask front desk or housekeeping for laundry bag)
 - Airport Shuttle / Transfer: Available upon request (48 hours advance notice preferred)
 - Parking: Complimentary for registered hotel guests
 
@@ -295,7 +295,7 @@ const FALLBACK_RULES: FallbackRule[] = [
     patterns: [/laundry|dry.clean|washing|iron|ironing/i],
     response: () =>
       `👔 **Laundry & Dry-Cleaning:**\n` +
-      `• For **same-day service**, please submit items before **9:00 AM** using the laundry bag in your wardrobe.\n` +
+      `• For **same-day service**, please submit items before **9:00 AM** , you can ask the front desk or housekeeping for laundry bag.\n` +
       `• Irons and ironing boards can also be delivered to your room upon request. Would you like me to request an iron or laundry pickup?`,
   },
 
