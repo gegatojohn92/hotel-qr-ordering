@@ -17,6 +17,17 @@ interface PhoneCaptureModalProps {
 
 export const GUEST_PHONE_STORAGE_KEY = 'hotel_guest_phone_number'
 
+export function generateClientSessionId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID()
+    }
+  } catch {
+    // fallback below
+  }
+  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
 export function getStoredGuestPhone(): string | null {
   if (typeof window === 'undefined') return null
   return sessionStorage.getItem(GUEST_PHONE_STORAGE_KEY)
@@ -32,9 +43,28 @@ export function getStoredGuestSessionId(roomId: string): string | null {
   return sessionStorage.getItem(`hotel_guest_session_${roomId}`)
 }
 
+export function getOrCreateGuestSessionId(roomId: string): string {
+  if (typeof window === 'undefined' || !roomId) return generateClientSessionId()
+  const existing = sessionStorage.getItem(`hotel_guest_session_${roomId}`)
+  if (existing) return existing
+  const newId = generateClientSessionId()
+  sessionStorage.setItem(`hotel_guest_session_${roomId}`, newId)
+  return newId
+}
+
 export function storeGuestSessionId(roomId: string, sessionId: string): void {
   if (typeof window === 'undefined' || !roomId) return
   sessionStorage.setItem(`hotel_guest_session_${roomId}`, sessionId)
+}
+
+export function getStoredGuestConversationId(roomId: string): string | null {
+  if (typeof window === 'undefined' || !roomId) return null
+  return sessionStorage.getItem(`hotel_guest_chat_conv_${roomId}`)
+}
+
+export function storeGuestConversationId(roomId: string, convId: string): void {
+  if (typeof window === 'undefined' || !roomId || !convId) return
+  sessionStorage.setItem(`hotel_guest_chat_conv_${roomId}`, convId)
 }
 
 export default function PhoneCaptureModal({
@@ -87,24 +117,22 @@ export default function PhoneCaptureModal({
 
       if (error) {
         console.warn('Guest session insert notice:', error.message)
+        createdSessionId = generateClientSessionId()
+        storeGuestSessionId(roomId, createdSessionId)
       } else if (data?.id) {
         createdSessionId = data.id
         storeGuestSessionId(roomId, data.id)
+      } else {
+        createdSessionId = generateClientSessionId()
+        storeGuestSessionId(roomId, createdSessionId)
       }
 
       onSuccess(cleaned, createdSessionId)
     } catch (err) {
       console.error('Error saving phone session:', err)
-      // Fallback: always ensure a session ID exists client-side
       if (!createdSessionId) {
-        try {
-          createdSessionId = crypto.randomUUID()
-          storeGuestSessionId(roomId, createdSessionId)
-        } catch {
-          // crypto.randomUUID not available (very old browser) — use timestamp fallback
-          createdSessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-          storeGuestSessionId(roomId, createdSessionId)
-        }
+        createdSessionId = generateClientSessionId()
+        storeGuestSessionId(roomId, createdSessionId)
       }
       onSuccess(cleaned, createdSessionId)
     } finally {

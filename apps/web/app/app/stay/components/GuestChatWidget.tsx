@@ -20,7 +20,10 @@ import type { GuestChatMessage, GuestConversation } from '@hotel-qr/supabase/typ
 import PhoneCaptureModal, {
   getStoredGuestPhone,
   getStoredGuestSessionId,
+  getOrCreateGuestSessionId,
   storeGuestSessionId,
+  getStoredGuestConversationId,
+  storeGuestConversationId,
 } from './PhoneCaptureModal'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -161,6 +164,7 @@ export default function GuestChatWidget() {
   useEffect(() => {
     if (!roomId) return
     setEffectiveRoomId(roomId)
+    getOrCreateGuestSessionId(roomId)
 
     if (hotelId) {
       setHotelIdResolved(hotelId)
@@ -191,15 +195,34 @@ export default function GuestChatWidget() {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 150)
   }, [isOpen])
 
-  // ── Load existing conversation scoped to active guest session ────────────
+  // ── Load existing conversation scoped strictly to active guest session ────
   const loadConversation = useCallback(async () => {
     if (!effectiveRoomId || !hotelIdResolved) return
 
+    const storedConvId = getStoredGuestConversationId(effectiveRoomId)
     const activeSessionId = getStoredGuestSessionId(effectiveRoomId)
     let conv: any = null
 
-    // 1. If activeSessionId is present, try loading conversation scoped to this session
-    if (activeSessionId) {
+    // 1. First, check by explicit stored conversation ID for this session/tab
+    if (storedConvId) {
+      try {
+        const { data: convById, error: convErr } = await (supabase as any)
+          .from('guest_conversations')
+          .select('*')
+          .eq('id', storedConvId)
+          .neq('status', 'RESOLVED')
+          .maybeSingle()
+
+        if (!convErr && convById) {
+          conv = convById
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Second, if no conversation found by ID, try loading by active session_id
+    if (!conv && activeSessionId) {
       try {
         const { data: scopedConv, error: scopedErr } = await (supabase as any)
           .from('guest_conversations')
@@ -214,36 +237,16 @@ export default function GuestChatWidget() {
 
         if (!scopedErr && scopedConv) {
           conv = scopedConv
+          storeGuestConversationId(effectiveRoomId, scopedConv.id)
         }
       } catch {
         // session_id column might not exist or query failed
       }
     }
 
-    // 2. If no scoped conversation found AND there's no active session ID,
-    //    fall back to room-level active conversation (legacy / no-session path).
-    //    When a session ID IS present but returned no match, we intentionally
-    //    return empty so the backend creates a fresh conversation for this guest.
-    if (!conv && !activeSessionId) {
-      try {
-        const { data: roomConv } = await (supabase as any)
-          .from('guest_conversations')
-          .select('*')
-          .eq('room_id', effectiveRoomId)
-          .eq('hotel_id', hotelIdResolved)
-          .neq('status', 'RESOLVED')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (roomConv) {
-          conv = roomConv
-        }
-      } catch {
-        // ignore
-      }
-    }
-
+    // 3. IMPORTANT: NO room-level fallback!
+    //    If no conversation is bound to this guest's active session, conv remains null.
+    //    This guarantees a clean slate (0 messages) for new guests or fresh QR scans.
     if (conv) {
       setConversation(conv)
       setUnreadCount(conv.unread_guest_count || 0)
@@ -260,6 +263,10 @@ export default function GuestChatWidget() {
       if (msgs) {
         setMessages(msgs as OptimisticMessage[])
       }
+    } else {
+      setConversation(null)
+      setMessages([])
+      setUnreadCount(0)
     }
   }, [effectiveRoomId, hotelIdResolved]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -358,7 +365,7 @@ export default function GuestChatWidget() {
         return
       }
 
-      const activeSessionId = getStoredGuestSessionId(effectiveRoomId)
+      const activeSessionId = getOrCreateGuestSessionId(effectiveRoomId)
 
       setInputText('')
       setIsSending(true)
@@ -401,9 +408,12 @@ export default function GuestChatWidget() {
 
         const data = await res.json()
 
-        if (data?.conversation_id && !conversation?.id) {
-          // Newly created conversation — load it
-          await loadConversation()
+        if (data?.conversation_id) {
+          storeGuestConversationId(effectiveRoomId, data.conversation_id)
+          if (!conversation?.id) {
+            // Newly created conversation — load it
+            await loadConversation()
+          }
         }
 
         // Remove optimistic message (real one will arrive via Realtime)

@@ -50,44 +50,21 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 1b. Fallback: find any active conversation for this room
-      //     ONLY when no session_id is present. When session_id is provided but
-      //     returned no match in Step 1a, always create a fresh conversation so
-      //     the new guest's chat is fully isolated from prior sessions.
-      if (!convId && !session_id) {
-        const { data: existing } = await supabase
-          .from('guest_conversations')
-          .select('id, status')
-          .eq('hotel_id', hotel_id)
-          .eq('room_id', room_id)
-          .neq('status', 'RESOLVED')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (existing?.id) {
-          convId = existing.id
-        }
-      }
+      // 1b. No room-wide fallback: If no active conversation exists for this specific
+      //     session or conversation ID, always create a brand-new conversation so
+      //     new guests / QR scans never inherit a previous guest's chat history.
 
       // 1c. Create new conversation if none exists
       if (!convId) {
         let effectivePhone = guest_phone ? String(guest_phone).trim() : null
-        if (!effectivePhone) {
+        if (!effectivePhone && session_id) {
           try {
-            let sessQuery = supabase
+            const { data: sessData } = await supabase
               .from('guest_sessions')
               .select('phone_number')
-              .order('created_at', { ascending: false })
-              .limit(1)
+              .eq('id', session_id)
+              .maybeSingle()
 
-            if (session_id) {
-              sessQuery = sessQuery.eq('id', session_id)
-            } else {
-              sessQuery = sessQuery.eq('room_id', room_id)
-            }
-
-            const { data: sessData } = await sessQuery.maybeSingle()
             if (sessData?.phone_number) {
               effectivePhone = sessData.phone_number
             }

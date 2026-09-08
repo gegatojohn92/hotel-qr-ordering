@@ -36,7 +36,15 @@ export default function GuestSessionKeeper({
 
     try {
       const sessionKey = `hotel_guest_session_${roomId}`
-      const existingSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey) : null
+      let existingSession = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey) : null
+      if (!existingSession && typeof sessionStorage !== 'undefined') {
+        try {
+          existingSession = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sess-${Date.now()}`
+          sessionStorage.setItem(sessionKey, existingSession)
+        } catch {
+          // ignore
+        }
+      }
 
       // Check if session exists in DB or create a new active session
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
