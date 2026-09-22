@@ -18,7 +18,7 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/4e2f24d0-60e3-4ce3-891e-1f2a1e591df6",
+      "url": "https://u.expo.dev/23c894de-aa0b-40d0-948f-a3d4f428eb72",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
@@ -70,9 +70,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "4e2f24d0-60e3-4ce3-891e-1f2a1e591df6"
+        "projectId": "23c894de-aa0b-40d0-948f-a3d4f428eb72"
       }
     },
-    "owner": "johngegato"
+    "owner": "jhigz"
   }
 }
