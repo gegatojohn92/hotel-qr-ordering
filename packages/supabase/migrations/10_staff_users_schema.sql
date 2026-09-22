@@ -26,5 +26,12 @@ FROM hotels h
 WHERE h.name = 'Grand Hotel'
 ON CONFLICT (email) DO NOTHING;
 
-ALTER TABLE requests
-  ALTER COLUMN claimed_by TYPE UUID USING NULLIF(claimed_by, '')::UUID;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'requests' AND column_name = 'claimed_by' AND data_type = 'text'
+  ) THEN
+    ALTER TABLE requests ALTER COLUMN claimed_by TYPE UUID USING (CASE WHEN claimed_by = '' THEN NULL ELSE claimed_by::UUID END);
+  END IF;
+END $$;
